@@ -391,6 +391,363 @@ def plot_iso21448_scenario_grid(save_path: Optional[str] = None) -> plt.Figure:
     return fig
 
 
+def plot_indicator_distributions(
+    mean_conf: np.ndarray,
+    conf_var: np.ndarray,
+    geo_disagree: np.ndarray,
+    labels: np.ndarray,
+    save_path: Optional[str] = None,
+) -> plt.Figure:
+    """
+    Plot distribution histograms for all three uncertainty indicators,
+    split by TP/FP. Shows the separation between correct and incorrect
+    detections for each indicator.
+    """
+    _apply_style()
+    fig, axes = plt.subplots(1, 3, figsize=(16, 5))
+
+    tp_mask = labels == 1
+    fp_mask = labels == 0
+
+    indicators = [
+        ("Mean Confidence ($\\bar{s}_j$)", mean_conf, True),
+        ("Confidence Variance ($\\sigma^2_{s,j}$)", conf_var, False),
+        ("Geometric Disagreement ($d_{iou,j}$)", geo_disagree, False),
+    ]
+
+    for ax, (name, vals, higher_is_correct) in zip(axes, indicators):
+        bins = 30
+        ax.hist(vals[tp_mask], bins=bins, alpha=0.6, color="#2196F3",
+                label=f"TP (n={np.sum(tp_mask)})", density=True, edgecolor="white")
+        ax.hist(vals[fp_mask], bins=bins, alpha=0.6, color="#F44336",
+                label=f"FP (n={np.sum(fp_mask)})", density=True, edgecolor="white")
+
+        # Mark medians
+        ax.axvline(np.median(vals[tp_mask]), color="#1565C0", linestyle="--", linewidth=1.5, alpha=0.8)
+        ax.axvline(np.median(vals[fp_mask]), color="#C62828", linestyle="--", linewidth=1.5, alpha=0.8)
+
+        ax.set_xlabel(name)
+        ax.set_ylabel("Density")
+        ax.legend(fontsize=8)
+
+    fig.suptitle("Uncertainty Indicator Distributions: TP vs FP", fontsize=13, y=1.02)
+    plt.tight_layout()
+    if save_path:
+        fig.savefig(save_path, dpi=150, bbox_inches="tight")
+    return fig
+
+
+def plot_condition_boxplots(
+    mean_conf: np.ndarray,
+    conf_var: np.ndarray,
+    labels: np.ndarray,
+    conditions: np.ndarray,
+    save_path: Optional[str] = None,
+) -> plt.Figure:
+    """
+    Box plots of uncertainty indicators per triggering condition category.
+    Shows how uncertainty varies across environmental conditions.
+    """
+    _apply_style()
+    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+
+    unique_conds = sorted(np.unique(conditions))
+    fp_mask = labels == 0
+
+    # 1. Mean confidence per condition (all detections)
+    ax = axes[0, 0]
+    data = [mean_conf[conditions == c] for c in unique_conds]
+    bp = ax.boxplot(data, labels=unique_conds, patch_artist=True)
+    for patch in bp['boxes']:
+        patch.set_facecolor('#E3F2FD')
+    ax.set_ylabel("Mean Confidence")
+    ax.set_title("Mean Confidence by Condition (All Detections)")
+
+    # 2. Confidence variance per condition (all detections)
+    ax = axes[0, 1]
+    data = [conf_var[conditions == c] for c in unique_conds]
+    bp = ax.boxplot(data, labels=unique_conds, patch_artist=True)
+    for patch in bp['boxes']:
+        patch.set_facecolor('#FFF3E0')
+    ax.set_ylabel("Confidence Variance")
+    ax.set_title("Confidence Variance by Condition (All Detections)")
+
+    # 3. FP-only mean confidence
+    ax = axes[1, 0]
+    data = [mean_conf[fp_mask & (conditions == c)] for c in unique_conds]
+    data = [d for d in data if len(d) > 0]
+    cond_labels = [c for c, d in zip(unique_conds, [mean_conf[fp_mask & (conditions == c)] for c in unique_conds]) if len(d) > 0]
+    if data:
+        bp = ax.boxplot(data, labels=cond_labels, patch_artist=True)
+        for patch in bp['boxes']:
+            patch.set_facecolor('#FFEBEE')
+    ax.set_ylabel("Mean Confidence (FP only)")
+    ax.set_title("FP Mean Confidence by Condition")
+
+    # 4. FP-only variance
+    ax = axes[1, 1]
+    data = [conf_var[fp_mask & (conditions == c)] for c in unique_conds]
+    data = [d for d in data if len(d) > 0]
+    if data:
+        bp = ax.boxplot(data, labels=cond_labels, patch_artist=True)
+        for patch in bp['boxes']:
+            patch.set_facecolor('#FFEBEE')
+    ax.set_ylabel("Confidence Variance (FP only)")
+    ax.set_title("FP Confidence Variance by Condition")
+
+    plt.suptitle("Per-Condition Uncertainty Analysis", fontsize=14, y=1.02)
+    plt.tight_layout()
+    if save_path:
+        fig.savefig(save_path, dpi=150, bbox_inches="tight")
+    return fig
+
+
+def plot_member_agreement(
+    scores: np.ndarray,
+    labels: np.ndarray,
+    save_path: Optional[str] = None,
+) -> plt.Figure:
+    """
+    Plot ensemble member agreement: how many members detected each proposal.
+    Shows that TP are detected by most/all members while FP have fewer.
+    """
+    _apply_style()
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
+
+    K = scores.shape[1]
+    n_detecting = np.sum(scores > 0, axis=1)
+
+    tp_mask = labels == 1
+    fp_mask = labels == 0
+
+    bins = np.arange(0.5, K + 1.5, 1)
+
+    # TP
+    ax1.hist(n_detecting[tp_mask], bins=bins, color="#2196F3", alpha=0.7,
+             edgecolor="white", label=f"TP (n={np.sum(tp_mask)})")
+    ax1.set_xlabel("Number of Members Detecting")
+    ax1.set_ylabel("Count")
+    ax1.set_title("TP: Member Agreement")
+    ax1.set_xticks(range(1, K + 1))
+    ax1.legend()
+
+    # FP
+    ax2.hist(n_detecting[fp_mask], bins=bins, color="#F44336", alpha=0.7,
+             edgecolor="white", label=f"FP (n={np.sum(fp_mask)})")
+    ax2.set_xlabel("Number of Members Detecting")
+    ax2.set_ylabel("Count")
+    ax2.set_title("FP: Member Agreement")
+    ax2.set_xticks(range(1, K + 1))
+    ax2.legend()
+
+    fig.suptitle(f"Ensemble Member Agreement (K={K})", fontsize=13, y=1.02)
+    plt.tight_layout()
+    if save_path:
+        fig.savefig(save_path, dpi=150, bbox_inches="tight")
+    return fig
+
+
+def plot_condition_breakdown(
+    labels: np.ndarray,
+    conditions: np.ndarray,
+    save_path: Optional[str] = None,
+) -> plt.Figure:
+    """
+    Stacked bar chart showing TP/FP breakdown per condition.
+    """
+    _apply_style()
+    fig, ax = plt.subplots(figsize=(10, 5))
+
+    unique_conds = sorted(np.unique(conditions))
+    tp_counts = [np.sum((labels == 1) & (conditions == c)) for c in unique_conds]
+    fp_counts = [np.sum((labels == 0) & (conditions == c)) for c in unique_conds]
+
+    x = np.arange(len(unique_conds))
+    width = 0.6
+
+    bars_tp = ax.bar(x, tp_counts, width, label="TP", color="#2196F3", edgecolor="white")
+    bars_fp = ax.bar(x, fp_counts, width, bottom=tp_counts, label="FP", color="#F44336", edgecolor="white")
+
+    # Annotate
+    for i, (tp, fp) in enumerate(zip(tp_counts, fp_counts)):
+        total = tp + fp
+        ax.text(i, total + 1, f"{total}", ha="center", fontsize=9, fontweight="bold")
+        if tp > 0:
+            ax.text(i, tp / 2, f"{tp}", ha="center", fontsize=8, color="white")
+        if fp > 0:
+            ax.text(i, tp + fp / 2, f"{fp}", ha="center", fontsize=8, color="white")
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(unique_conds, rotation=15, ha="right")
+    ax.set_ylabel("Detection Count")
+    ax.set_title("TP / FP Breakdown by Triggering Condition")
+    ax.legend()
+
+    plt.tight_layout()
+    if save_path:
+        fig.savefig(save_path, dpi=150, bbox_inches="tight")
+    return fig
+
+
+def plot_operating_point_heatmap(
+    mean_conf: np.ndarray,
+    conf_var: np.ndarray,
+    geo_disagree: np.ndarray,
+    labels: np.ndarray,
+    save_path: Optional[str] = None,
+) -> plt.Figure:
+    """
+    Heatmap showing FAR as a function of confidence threshold and variance threshold.
+    """
+    _apply_style()
+    from sotif_uncertainty.sotif_analysis import acceptance_gate, compute_coverage_far
+
+    tau_s_vals = np.arange(0.30, 0.91, 0.05)
+    tau_v_vals = np.array([0.001, 0.002, 0.003, 0.005, 0.008, 0.010, 0.020, np.inf])
+    tau_v_labels = ["0.001", "0.002", "0.003", "0.005", "0.008", "0.010", "0.020", "inf"]
+
+    far_matrix = np.zeros((len(tau_v_vals), len(tau_s_vals)))
+    cov_matrix = np.zeros((len(tau_v_vals), len(tau_s_vals)))
+
+    for i, tv in enumerate(tau_v_vals):
+        for j, ts in enumerate(tau_s_vals):
+            accepted = acceptance_gate(mean_conf, conf_var, geo_disagree, ts, tv)
+            cov, far, _, _ = compute_coverage_far(accepted, labels)
+            far_matrix[i, j] = far
+            cov_matrix[i, j] = cov
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
+
+    # FAR heatmap
+    im1 = ax1.imshow(far_matrix, cmap="RdYlGn_r", aspect="auto", vmin=0, vmax=1)
+    ax1.set_xticks(range(len(tau_s_vals)))
+    ax1.set_xticklabels([f"{t:.2f}" for t in tau_s_vals], rotation=45, fontsize=8)
+    ax1.set_yticks(range(len(tau_v_vals)))
+    ax1.set_yticklabels(tau_v_labels, fontsize=8)
+    ax1.set_xlabel("Confidence Threshold ($\\tau_s$)")
+    ax1.set_ylabel("Variance Threshold ($\\tau_v$)")
+    ax1.set_title("False Acceptance Rate (FAR)")
+    plt.colorbar(im1, ax=ax1)
+
+    # Coverage heatmap
+    im2 = ax2.imshow(cov_matrix, cmap="Blues", aspect="auto", vmin=0, vmax=0.5)
+    ax2.set_xticks(range(len(tau_s_vals)))
+    ax2.set_xticklabels([f"{t:.2f}" for t in tau_s_vals], rotation=45, fontsize=8)
+    ax2.set_yticks(range(len(tau_v_vals)))
+    ax2.set_yticklabels(tau_v_labels, fontsize=8)
+    ax2.set_xlabel("Confidence Threshold ($\\tau_s$)")
+    ax2.set_ylabel("Variance Threshold ($\\tau_v$)")
+    ax2.set_title("Coverage")
+    plt.colorbar(im2, ax=ax2)
+
+    fig.suptitle("Acceptance Gate Operating Space", fontsize=13, y=1.02)
+    plt.tight_layout()
+    if save_path:
+        fig.savefig(save_path, dpi=150, bbox_inches="tight")
+    return fig
+
+
+def plot_summary_dashboard(
+    metrics: Dict,
+    mean_conf: np.ndarray,
+    conf_var: np.ndarray,
+    labels: np.ndarray,
+    tc_results: List[Dict],
+    save_path: Optional[str] = None,
+) -> plt.Figure:
+    """
+    Multi-panel summary dashboard with key results.
+    """
+    _apply_style()
+    fig = plt.figure(figsize=(18, 12))
+
+    tp_mask = labels == 1
+    fp_mask = labels == 0
+    disc = metrics["discrimination"]
+    cal = metrics["calibration"]
+    rc = metrics["risk_coverage"]
+
+    # 1. Scatter (top left)
+    ax1 = fig.add_subplot(2, 3, 1)
+    ax1.scatter(mean_conf[tp_mask], conf_var[tp_mask], c="#2196F3", s=20, alpha=0.5, label="TP")
+    ax1.scatter(mean_conf[fp_mask], conf_var[fp_mask], c="#F44336", marker="x", s=20, alpha=0.5, label="FP")
+    ax1.set_xlabel("Mean Confidence")
+    ax1.set_ylabel("Confidence Variance")
+    ax1.set_title("Uncertainty Landscape")
+    ax1.legend(fontsize=8)
+
+    # 2. ROC (top middle)
+    ax2 = fig.add_subplot(2, 3, 2)
+    fpr = disc["roc_fpr"]
+    tpr = disc["roc_tpr"]
+    ax2.plot(fpr, tpr, "b-", linewidth=2, label=f"AUROC={disc['auroc_mean_confidence']:.3f}")
+    ax2.plot([0, 1], [0, 1], "k--", alpha=0.3)
+    ax2.set_xlabel("FPR")
+    ax2.set_ylabel("TPR")
+    ax2.set_title("ROC Curve (Mean Confidence)")
+    ax2.legend(fontsize=8)
+
+    # 3. Risk-Coverage (top right)
+    ax3 = fig.add_subplot(2, 3, 3)
+    ax3.plot(rc["coverages"], rc["risks"], "b-", linewidth=2)
+    ax3.fill_between(rc["coverages"], rc["risks"], alpha=0.1)
+    ax3.set_xlabel("Coverage")
+    ax3.set_ylabel("Risk")
+    ax3.set_title(f"Risk-Coverage (AURC={rc['aurc']:.3f})")
+
+    # 4. Reliability diagram (bottom left)
+    ax4 = fig.add_subplot(2, 3, 4)
+    n_bins = len(cal["bin_accuracies"])
+    bin_centers = np.linspace(1 / (2 * n_bins), 1 - 1 / (2 * n_bins), n_bins)
+    ax4.bar(bin_centers, cal["bin_accuracies"], width=0.08, alpha=0.7, color="#2196F3", edgecolor="white")
+    ax4.plot([0, 1], [0, 1], "k--", linewidth=1)
+    ax4.set_xlabel("Predicted Confidence")
+    ax4.set_ylabel("Observed Accuracy")
+    ax4.set_title(f"Calibration (ECE={cal['ece']:.3f})")
+    ax4.set_xlim(0, 1)
+    ax4.set_ylim(0, 1.1)
+
+    # 5. TC ranking (bottom middle)
+    ax5 = fig.add_subplot(2, 3, 5)
+    conds = [r["condition"] for r in tc_results]
+    shares = [r["fp_share"] for r in tc_results]
+    colors_tc = plt.cm.Reds(np.linspace(0.3, 0.9, len(conds)))
+    ax5.barh(conds, shares, color=colors_tc, edgecolor="black", linewidth=0.5)
+    ax5.set_xlabel("FP Share")
+    ax5.set_title("TC Ranking (Clause 7)")
+
+    # 6. Key metrics text box (bottom right)
+    ax6 = fig.add_subplot(2, 3, 6)
+    ax6.axis("off")
+    metrics_text = (
+        f"SOTIF Evaluation Summary\n"
+        f"{'='*35}\n\n"
+        f"Dataset:\n"
+        f"  Proposals: {len(labels)} ({np.sum(tp_mask)} TP, {np.sum(fp_mask)} FP)\n\n"
+        f"Discrimination (Table 3):\n"
+        f"  AUROC (conf):  {disc['auroc_mean_confidence']:.3f}\n"
+        f"  AUROC (var):   {disc['auroc_confidence_variance']:.3f}\n"
+        f"  AUROC (geo):   {disc['auroc_geometric_disagreement']:.3f}\n\n"
+        f"Calibration (Table 4):\n"
+        f"  ECE:   {cal['ece']:.3f}\n"
+        f"  NLL:   {cal['nll']:.3f}\n"
+        f"  Brier: {cal['brier']:.3f}\n"
+        f"  AURC:  {rc['aurc']:.3f}\n\n"
+        f"Top Triggering Conditions:\n"
+        f"  1. {tc_results[0]['condition']} ({tc_results[0]['fp_share']:.0%})\n"
+        f"  2. {tc_results[1]['condition']} ({tc_results[1]['fp_share']:.0%})"
+    )
+    ax6.text(0.05, 0.95, metrics_text, transform=ax6.transAxes, fontsize=10,
+             verticalalignment="top", fontfamily="monospace",
+             bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.3))
+
+    fig.suptitle("SOTIF Uncertainty Evaluation -- Summary Dashboard", fontsize=15, y=1.01)
+    plt.tight_layout()
+    if save_path:
+        fig.savefig(save_path, dpi=150, bbox_inches="tight")
+    return fig
+
+
 def generate_all_figures(
     metrics: Dict,
     mean_conf: np.ndarray,
@@ -400,56 +757,101 @@ def generate_all_figures(
     tc_results: List[Dict],
     operating_points: List[Dict],
     output_dir: str = "Analysis",
+    scores: Optional[np.ndarray] = None,
+    geo_disagree: Optional[np.ndarray] = None,
+    conditions: Optional[np.ndarray] = None,
 ) -> Dict[str, plt.Figure]:
     """
-    Generate all paper figures and save to output directory.
+    Generate ALL figures and save to output directory.
+
+    Produces 13 figures covering all aspects of the evaluation:
+    - Paper figures (reliability, risk-coverage, scatter, frame risk)
+    - ROC curves, TC ranking, operating points, ISO grid
+    - NEW: distributions, box plots, member agreement, condition breakdown
+    - NEW: operating point heatmap, summary dashboard
     """
     import os
     os.makedirs(output_dir, exist_ok=True)
 
     figures = {}
 
-    # Reliability diagram
+    # ============================================================
+    # Paper figures (Figures 5-8)
+    # ============================================================
     cal = metrics["calibration"]
-    figures["reliability"] = plot_reliability_diagram(
+    figures["reliability_diagram"] = plot_reliability_diagram(
         cal["bin_accuracies"], cal["bin_confidences"], cal["bin_counts"],
         cal["ece"], save_path=os.path.join(output_dir, "reliability_diagram_rich.png"),
     )
 
-    # Risk-coverage
     rc = metrics["risk_coverage"]
     figures["risk_coverage"] = plot_risk_coverage(
         rc["coverages"], rc["risks"], rc["aurc"],
         save_path=os.path.join(output_dir, "risk_coverage_curve.png"),
     )
 
-    # Scatter
-    figures["scatter"] = plot_scatter_confidence_variance(
+    figures["scatter_conf_var"] = plot_scatter_confidence_variance(
         mean_conf, conf_var, labels,
         save_path=os.path.join(output_dir, "scatter_score_var_tp_fp.png"),
     )
 
-    # Frame risk
     figures["frame_risk"] = plot_frame_risk_scatter(
         frame_summaries,
         save_path=os.path.join(output_dir, "frame_risk_scatter.png"),
     )
 
-    # TC ranking
+    # ============================================================
+    # Analysis figures
+    # ============================================================
     figures["tc_ranking"] = plot_tc_ranking(
         tc_results,
         save_path=os.path.join(output_dir, "tc_ranking.png"),
     )
 
-    # Operating points
     figures["operating_points"] = plot_operating_points_comparison(
         operating_points,
         save_path=os.path.join(output_dir, "operating_points.png"),
     )
 
-    # ISO 21448 grid
     figures["iso21448_grid"] = plot_iso21448_scenario_grid(
         save_path=os.path.join(output_dir, "iso21448_scenario_grid.png"),
+    )
+
+    # ============================================================
+    # Extended visualizations
+    # ============================================================
+    if geo_disagree is not None:
+        figures["indicator_distributions"] = plot_indicator_distributions(
+            mean_conf, conf_var, geo_disagree, labels,
+            save_path=os.path.join(output_dir, "indicator_distributions.png"),
+        )
+
+        figures["operating_heatmap"] = plot_operating_point_heatmap(
+            mean_conf, conf_var, geo_disagree, labels,
+            save_path=os.path.join(output_dir, "operating_point_heatmap.png"),
+        )
+
+    if conditions is not None:
+        figures["condition_boxplots"] = plot_condition_boxplots(
+            mean_conf, conf_var, labels, conditions,
+            save_path=os.path.join(output_dir, "condition_boxplots.png"),
+        )
+
+        figures["condition_breakdown"] = plot_condition_breakdown(
+            labels, conditions,
+            save_path=os.path.join(output_dir, "condition_breakdown.png"),
+        )
+
+    if scores is not None:
+        figures["member_agreement"] = plot_member_agreement(
+            scores, labels,
+            save_path=os.path.join(output_dir, "member_agreement.png"),
+        )
+
+    # Summary dashboard
+    figures["summary_dashboard"] = plot_summary_dashboard(
+        metrics, mean_conf, conf_var, labels, tc_results,
+        save_path=os.path.join(output_dir, "summary_dashboard.png"),
     )
 
     plt.close("all")
