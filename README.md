@@ -3,6 +3,7 @@
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/milinpatel07/SOTIF_Uncertainty_Evaluation_Lidar_Object_Detection/blob/main/notebooks/SOTIF_Uncertainty_Evaluation_Demo.ipynb)
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Tests](https://img.shields.io/badge/tests-33%2F33%20passed-brightgreen)](tests/test_pipeline.py)
 
 Evaluation methodology for determining whether prediction uncertainty from ensemble-based LiDAR object detection supports **ISO 21448 (SOTIF)** analysis. This repository provides the complete pipeline from the paper:
 
@@ -49,11 +50,14 @@ pip install -e .
 # Run the evaluation with synthetic demo data
 python scripts/evaluate.py
 
+# Run tests to verify everything works
+python tests/test_pipeline.py
+
 # Or open the notebook locally
 jupyter notebook notebooks/SOTIF_Uncertainty_Evaluation_Demo.ipynb
 ```
 
-### Option 3: Real Data Pipeline (Requires GPU + KITTI)
+### Option 3: Real Data Pipeline (Requires GPU + KITTI or CARLA)
 
 See [Real Data Pipeline](#real-data-pipeline) below for the full walkthrough.
 
@@ -69,8 +73,26 @@ python scripts/run_inference.py \
     --ckpt_dirs output/ensemble/seed_* \
     --gt_path data/kitti/training/label_2
 
-# 4. Full evaluation (or use pre-computed pickle from step 3)
-python scripts/evaluate.py --input results/ensemble_results.pkl
+# 4. Full evaluation with GT matching and figure generation
+python scripts/evaluate.py \
+    --input results/ensemble_results.pkl \
+    --gt_path data/kitti/training/label_2 \
+    --calib_path data/kitti/training/calib
+```
+
+### Option 4: CARLA Simulation Data
+
+```bash
+# Generate synthetic LiDAR data with 22 weather configs (no CARLA needed)
+python scripts/generate_carla_data.py --output_dir data/carla --mode synthetic
+
+# Or connect to a running CARLA instance
+python scripts/generate_carla_data.py --output_dir data/carla --mode carla
+
+# Evaluate with condition metadata
+python scripts/evaluate.py \
+    --input results/ensemble_results.pkl \
+    --conditions_file data/carla/conditions.json
 ```
 
 ## Repository Structure
@@ -81,18 +103,23 @@ python scripts/evaluate.py --input results/ensemble_results.pkl
 │   ├── __init__.py             # Public API exports
 │   ├── uncertainty.py          # Stage 2: Uncertainty indicators (Eqs. 1-3)
 │   ├── ensemble.py             # DBSCAN clustering + uncertainty decomposition
-│   ├── matching.py             # Stage 3: TP/FP/FN greedy matching (BEV IoU ≥ 0.5)
+│   ├── matching.py             # Stage 3: TP/FP/FN greedy matching (BEV IoU >= 0.5)
 │   ├── metrics.py              # Stage 4: AUROC, AURC, ECE, NLL, Brier Score
 │   ├── sotif_analysis.py       # Stage 5: TC ranking, frame flags, acceptance gates
 │   ├── visualization.py        # 13 publication-quality figures
-│   └── demo_data.py            # Synthetic data generator (matches paper stats)
+│   ├── demo_data.py            # Synthetic data generator (matches paper stats)
+│   ├── kitti_utils.py          # KITTI calibration, label loading, point cloud I/O
+│   └── mc_dropout.py           # MC Dropout uncertainty (alternative to ensembles)
 ├── notebooks/
 │   └── SOTIF_Uncertainty_Evaluation_Demo.ipynb  # Interactive Colab notebook
 ├── scripts/
 │   ├── evaluate.py             # Standalone evaluation (Stages 2-5)
 │   ├── train_ensemble.sh       # Train K SECOND models via OpenPCDet
 │   ├── run_inference.py        # Ensemble inference + DBSCAN + evaluation
-│   └── prepare_kitti.py        # Download and prepare KITTI dataset
+│   ├── prepare_kitti.py        # Download and prepare KITTI dataset
+│   └── generate_carla_data.py  # Generate CARLA simulation data
+├── tests/
+│   └── test_pipeline.py        # 33 tests covering all pipeline stages
 ├── Analysis/                   # Pre-generated figures (13 plots)
 ├── data/                       # Dataset directory (not tracked)
 ├── requirements.txt
@@ -107,45 +134,45 @@ The methodology comprises five stages:
 
 ```
 LiDAR Frame + K Ensemble Members
-         │
-    ┌────▼────┐
-    │ Stage 1  │  Ensemble Inference (K independent forward passes)
-    └────┬────┘
-         │  K × D^(k) detections
-    ┌────▼────┐
-    │ Stage 2  │  DBSCAN Clustering + Uncertainty Indicators
-    └────┬────┘    ├─ Mean confidence (s̄ⱼ): existence uncertainty
-         │         ├─ Confidence variance (σ²ₛ,ⱼ): epistemic uncertainty
-         │         └─ Geometric disagreement (d_iou,j): localisation uncertainty
-    ┌────▼────┐
-    │ Stage 3  │  Correctness Determination (greedy matching, BEV IoU ≥ 0.5)
-    └────┬────┘    └─ TP / FP / FN labels per proposal
-         │
-    ┌────▼────┐
-    │ Stage 4  │  Metric Computation
-    └────┬────┘    ├─ Discrimination: AUROC, AURC
-         │         ├─ Calibration: ECE, NLL, Brier
-         │         └─ Operating characteristics: Coverage, FAR at thresholds
-    ┌────▼────┐
-    │ Stage 5  │  SOTIF Analysis Artefacts
-    └─────────┘    ├─ TC ranking (Clause 7)
-                   ├─ Frame flags (Clause 7, Area 3 → Area 2)
-                   ├─ Acceptance gates (Clause 11)
-                   └─ Confidence interpretation (Clause 10)
+         |
+    +----v----+
+    | Stage 1  |  Ensemble Inference (K independent forward passes)
+    +----+----+
+         |  K x D^(k) detections
+    +----v----+
+    | Stage 2  |  DBSCAN Clustering + Uncertainty Indicators
+    +----+----+    |-- Mean confidence (s_bar_j): existence uncertainty
+         |         |-- Confidence variance (sigma^2_s,j): epistemic uncertainty
+         |         +-- Geometric disagreement (d_iou,j): localisation uncertainty
+    +----v----+
+    | Stage 3  |  Correctness Determination (greedy matching, BEV IoU >= 0.5)
+    +----+----+    +-- TP / FP / FN labels per proposal
+         |
+    +----v----+
+    | Stage 4  |  Metric Computation
+    +----+----+    |-- Discrimination: AUROC, AURC
+         |         |-- Calibration: ECE, NLL, Brier
+         |         +-- Operating characteristics: Coverage, FAR at thresholds
+    +----v----+
+    | Stage 5  |  SOTIF Analysis Artefacts
+    +---------+    |-- TC ranking (Clause 7)
+                   |-- Frame flags (Clause 7, Area 3 -> Area 2)
+                   |-- Acceptance gates (Clause 11)
+                   +-- Confidence interpretation (Clause 10)
 ```
 
 ### Three Uncertainty Indicators
 
 | Indicator | Formula | Uncertainty Type | Safety Concern |
 |---|---|---|---|
-| Mean confidence s̄ⱼ | (1/K) Σ s_j^(k) | Existence | False/missed detection |
-| Confidence variance σ²ₛ,ⱼ | (1/(K-1)) Σ (s_j^(k) - s̄ⱼ)² | Epistemic | Unknown operating condition |
-| Geometric disagreement d_iou,j | 1 - mean pairwise BEV IoU | Localisation | Incorrect distance estimate |
+| Mean confidence | (1/K) * sum(s_j^(k)) | Existence | False/missed detection |
+| Confidence variance | (1/(K-1)) * sum((s_j^(k) - s_bar)^2) | Epistemic | Unknown operating condition |
+| Geometric disagreement | 1 - mean pairwise BEV IoU | Localisation | Incorrect distance estimate |
 
 ### Acceptance Gate
 
 ```
-G(s̄ⱼ, σ²ₛ,ⱼ, d_iou,j) = [s̄ⱼ ≥ τₛ] ∧ [σ²ₛ,ⱼ ≤ τᵥ] ∧ [d_iou,j ≤ τ_d]
+G(s_bar, sigma^2_s, d_iou) = [s_bar >= tau_s] AND [sigma^2_s <= tau_v] AND [d_iou <= tau_d]
 ```
 
 The multi-indicator gate achieves zero FAR at a lower confidence threshold by using variance as an additional filter.
@@ -162,6 +189,10 @@ Detections from K ensemble members are clustered using DBSCAN on a BEV IoU dista
    - **Consensus**: `min_samples=K//2+1` (majority must agree)
    - **Unanimous**: `min_samples=K` (all members must agree)
 5. Aggregate cluster: mean box position, yaw from highest-confidence member
+
+### MC Dropout Alternative
+
+As an alternative to deep ensembles, the `mc_dropout` module provides Monte Carlo Dropout uncertainty estimation using a single model with K stochastic forward passes. This requires only one trained model but typically yields lower uncertainty quality (see notebook Section 13 for comparison).
 
 ## Generated Figures
 
@@ -181,7 +212,7 @@ The pipeline produces 13 publication-quality figures:
 | Condition boxplots | Per-condition score and variance distributions | Extended |
 | Member agreement heatmap | Score correlation across ensemble members | Extended |
 | Condition breakdown | Stacked bar chart of TP/FP by environment | Extended |
-| Operating point heatmap | 2D threshold sweep (confidence × variance) | Extended |
+| Operating point heatmap | 2D threshold sweep (confidence x variance) | Extended |
 
 All figures are saved to `Analysis/` when running `scripts/evaluate.py`.
 
@@ -209,8 +240,9 @@ python setup.py develop
 python -c "from pcdet.models import build_network; print('OpenPCDet OK')"
 ```
 
-### Step 2: Prepare KITTI Dataset
+### Step 2: Prepare Dataset
 
+**Option A: KITTI**
 ```bash
 # Automated download and preparation
 python scripts/prepare_kitti.py --data_root data/kitti
@@ -220,21 +252,27 @@ python scripts/prepare_kitti.py --data_root data/kitti
 # Components needed: velodyne (29 GB), labels (5 MB), calib (16 MB)
 ```
 
-Expected directory structure:
+**Option B: CARLA**
+```bash
+# Generate synthetic data with all 22 weather configs
+python scripts/generate_carla_data.py --output_dir data/carla --frames_per_config 10
+
+# This creates KITTI-format data with condition metadata
+# for SOTIF triggering condition analysis
 ```
-data/kitti/
+
+Expected directory structure (both KITTI and CARLA outputs):
+```
+data/{kitti,carla}/
 ├── training/
-│   ├── velodyne/     # 7481 .bin point cloud files
-│   ├── label_2/      # 7481 .txt label files
-│   ├── calib/        # 7481 .txt calibration files
-│   └── image_2/      # 7481 .png images (optional)
-├── testing/
-│   ├── velodyne/     # 7518 .bin point cloud files
-│   └── calib/        # 7518 .txt calibration files
-└── ImageSets/
-    ├── train.txt     # 3712 training frame IDs
-    ├── val.txt       # 3769 validation frame IDs
-    └── test.txt      # 7518 test frame IDs
+│   ├── velodyne/     # .bin point cloud files
+│   ├── label_2/      # .txt label files
+│   ├── calib/        # .txt calibration files
+│   └── image_2/      # .png images (optional)
+├── ImageSets/
+│   ├── train.txt     # Training frame IDs
+│   └── val.txt       # Validation frame IDs
+└── conditions.json   # Per-frame weather metadata (CARLA only)
 ```
 
 Then create OpenPCDet data info files:
@@ -259,7 +297,7 @@ bash scripts/train_ensemble.sh \
     --num_gpus 1
 ```
 
-Each member trains the same SECOND architecture (`MeanVFE -> VoxelBackBone8x -> HeightCompression -> BaseBEVBackbone -> AnchorHeadSingle`) with identical hyperparameters, differing only in random seed. Training takes approximately 2-4 hours per member on a single GPU.
+Each member trains the same SECOND architecture (`MeanVFE -> VoxelBackBone8x -> HeightCompression -> BaseBEVBackbone -> AnchorHeadSingle`) with identical hyperparameters, differing only in random seed.
 
 **Note on random seeds**: Standard OpenPCDet uses a hardcoded seed of 666. The training script passes `--set OPTIMIZATION.SEED <seed>` which works with LiDAR-MIMO's OpenPCDet fork. For standard OpenPCDet, modify `pcdet/utils/common_utils.py`:
 
@@ -303,8 +341,19 @@ python scripts/run_inference.py \
 ### Step 5: Evaluate
 
 ```bash
-# Standalone evaluation with figures
+# Standalone evaluation with figures (labels in pickle from step 4)
 python scripts/evaluate.py --input results/ensemble_results.pkl
+
+# With separate GT path and calibration (for proper KITTI label loading)
+python scripts/evaluate.py \
+    --input results/ensemble_results.pkl \
+    --gt_path data/kitti/training/label_2 \
+    --calib_path data/kitti/training/calib
+
+# With CARLA condition metadata (for TC analysis)
+python scripts/evaluate.py \
+    --input results/ensemble_results.pkl \
+    --conditions_file data/carla/conditions.json
 
 # Or open the notebook for interactive analysis
 jupyter notebook notebooks/SOTIF_Uncertainty_Evaluation_Demo.ipynb
@@ -314,7 +363,7 @@ jupyter notebook notebooks/SOTIF_Uncertainty_Evaluation_Demo.ipynb
 
 If you already have OpenPCDet prediction files (`result.pkl` from `eval_utils.eval_one_epoch()`), you can skip training and inference:
 
-```python
+```bash
 # OpenPCDet result.pkl format: list[dict], one dict per frame
 # Each dict: {'name', 'score', 'boxes_lidar', 'pred_labels', ...}
 
@@ -324,6 +373,46 @@ python scripts/run_inference.py \
                 member_2/result.pkl member_3/result.pkl \
                 member_4/result.pkl member_5/result.pkl \
     --gt_path data/kitti/training/label_2
+```
+
+## KITTI Utilities
+
+The `kitti_utils` module provides proper coordinate transformation between camera and LiDAR frames:
+
+```python
+from sotif_uncertainty.kitti_utils import (
+    KITTICalibration,
+    load_kitti_labels_as_lidar,
+    load_point_cloud,
+    voxelize_point_cloud,
+)
+
+# Load calibration and convert labels from camera to LiDAR frame
+gt_boxes_lidar = load_kitti_labels_as_lidar(
+    'data/kitti/training/label_2/000000.txt',
+    'data/kitti/training/calib/000000.txt',
+)
+
+# Load and filter point cloud
+points = load_point_cloud(
+    'data/kitti/training/velodyne/000000.bin',
+    xlim=(0, 70.4), ylim=(-40, 40), zlim=(-3, 1),
+)
+
+# Voxelize for SECOND detector input
+voxels, coords, num_pts = voxelize_point_cloud(points)
+```
+
+## Testing
+
+Run the full test suite (33 tests covering all pipeline stages):
+
+```bash
+python tests/test_pipeline.py
+
+# Or with pytest
+pip install pytest
+pytest tests/ -v
 ```
 
 ## Available Datasets for Reproduction
@@ -336,7 +425,7 @@ python scripts/run_inference.py \
 | **CADC** | ~7K frames | Custom | Snow/winter | Free ([cadcd.uwaterloo.ca](http://cadcd.uwaterloo.ca/)) |
 | **CARLA** | Custom | KITTI | Any (simulated) | Free ([carla.org](https://carla.org/)) |
 
-For the paper's case study, data was generated using CARLA with 22 environmental configurations (Table 2 in paper).
+For the paper's case study, data was generated using CARLA with 22 environmental configurations (Table 2 in paper). Use `scripts/generate_carla_data.py` to generate equivalent data.
 
 ## Related Repositories
 
@@ -353,13 +442,13 @@ For the paper's case study, data was generated using CARLA with 22 environmental
 **Demo mode** (synthetic data, Colab-compatible):
 - numpy >= 1.20
 - matplotlib >= 3.4
+- scikit-learn >= 0.24
 
 **Full pipeline** (real data, requires GPU):
 - [OpenPCDet](https://github.com/open-mmlab/OpenPCDet) >= 0.6
 - PyTorch >= 1.10
 - spconv v2.x
 - CUDA 11.x
-- scikit-learn (for DBSCAN clustering)
 
 ## Citation
 
@@ -381,6 +470,7 @@ If you use this methodology or code, please cite:
 - ISO 21448:2022 - Safety of the Intended Functionality (SOTIF)
 - ISO/PAS 8800:2024 - Safety for AI-based systems in road vehicles
 - Lakshminarayanan et al. (2017) - Simple and Scalable Predictive Uncertainty Estimation using Deep Ensembles
+- Gal and Ghahramani (2016) - Dropout as a Bayesian Approximation: Representing Model Uncertainty in Deep Learning
 - Feng et al. (2018, 2021) - Uncertainty estimation for LiDAR 3D detection
 - Yan et al. (2018) - SECOND: Sparsely Embedded Convolutional Detection
 - Pitropov et al. (2022) - LiDAR-MIMO: Efficient Uncertainty Estimation for LiDAR 3D Object Detection

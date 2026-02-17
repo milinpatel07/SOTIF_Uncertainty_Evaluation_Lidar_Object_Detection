@@ -1,10 +1,10 @@
 [build-system]
 requires = ["setuptools>=61.0"]
-build-backend = "setuptools.backends._legacy:_Backend"
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "sotif_uncertainty"
-version = "1.0.0"
+version = "1.1.0"
 description = "Uncertainty evaluation methodology for SOTIF analysis of ML-based LiDAR object detection"
 readme = "README.md"
 license = {text = "MIT"}
@@ -16,6 +16,7 @@ authors = [
 dependencies = [
     "numpy>=1.20",
     "matplotlib>=3.4",
+    "scikit-learn>=0.24",
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
