@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Data (too large for git)
+data/kitti/
+data/nuscenes/
+data/carla/
+*.bin
+*.pcd
+
+# Model checkpoints
+output/
+*.pth
+*.ckpt
+
+# Results (regenerable)
+results/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Generated figures (regenerable, but we keep the Analysis/ dir)
+# Analysis/*.png
