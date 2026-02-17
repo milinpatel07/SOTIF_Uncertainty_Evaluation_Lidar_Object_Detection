@@ -180,11 +180,12 @@ def _generate_fp_scores_by_condition(
         ns_lo, ns_hi = params["noise_std_range"]
         noise_std = rng.uniform(ns_lo, ns_hi)
 
-        # Most FP detected by all 6 or 5 members
+        # Most FP detected by all or nearly all members
         if rng.random() < params["all_detect_prob"]:
             n_detect = K  # All members detect
         else:
-            n_detect = rng.choice([4, 5], p=[0.4, 0.6])
+            n_detect = max(1, min(K - 1, rng.choice(
+                [max(1, K - 2), max(1, K - 1)], p=[0.4, 0.6])))
 
         detecting_members = sorted(rng.choice(K, size=n_detect, replace=False))
 
@@ -324,8 +325,11 @@ def generate_ensemble_boxes(
             dim_noise = rng.uniform(0.1, 0.3)
             yaw_noise = rng.uniform(0.05, 0.5)
 
-            # Determine which members detect (1-4 typically)
-            n_detect = rng.choice([1, 2, 3, 4, 5, 6], p=[0.15, 0.25, 0.30, 0.18, 0.08, 0.04])
+            # Determine which members detect (1 to K)
+            choices = list(range(1, K + 1))
+            probs = [0.15, 0.25, 0.30, 0.18, 0.08, 0.04][:len(choices)]
+            probs = np.array(probs) / sum(probs)  # normalize
+            n_detect = rng.choice(choices, p=probs)
             detecting_members = rng.choice(K, size=n_detect, replace=False)
 
             for k in range(K):

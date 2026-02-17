@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="sotif_uncertainty",
-    version="1.0.0",
+    version="1.1.0",
     description=(
         "Uncertainty evaluation methodology for SOTIF analysis "
         "of ML-based LiDAR object detection"
@@ -15,6 +15,7 @@ setup(
     install_requires=[
         "numpy>=1.20",
         "matplotlib>=3.4",
+        "scikit-learn>=0.24",
     ],
     classifiers=[
         "Development Status :: 4 - Beta",
