@@ -373,6 +373,200 @@ TC_CATEGORY_MAP = {
 }
 
 
+def collect_carla_frame(
+    world,
+    config_name: str,
+    config: dict,
+    n_vehicles: int = 8,
+    n_pedestrians: int = 3,
+    seed: int = 42,
+) -> dict:
+    """
+    Collect a single LiDAR frame from a running CARLA instance.
+
+    Sets weather, spawns actors, captures LiDAR data, extracts ground
+    truth bounding boxes, then cleans up.
+
+    Parameters
+    ----------
+    world : carla.World
+        CARLA world handle.
+    config_name : str
+        Name from WEATHER_CONFIGS.
+    config : dict
+        Weather configuration dictionary.
+    n_vehicles : int
+        Number of vehicles to spawn.
+    n_pedestrians : int
+        Number of pedestrians to spawn.
+    seed : int
+        Random seed for reproducibility.
+
+    Returns
+    -------
+    dict with keys matching generate_synthetic_lidar_frame output.
+    """
+    import carla
+    import time
+
+    rng = np.random.RandomState(seed)
+    weather_params = config["carla_weather"]
+
+    # Set weather
+    weather = carla.WeatherParameters(
+        cloudiness=weather_params["cloudiness"],
+        precipitation=weather_params["precipitation"],
+        sun_altitude_angle=weather_params.get("sun_altitude_angle",
+                                               config.get("sun_azimuth", 70.0)),
+        fog_density=weather_params["fog_density"],
+        wetness=weather_params["wetness"],
+        wind_intensity=weather_params["wind_intensity"],
+    )
+    if hasattr(weather, "sun_azimuth_angle"):
+        weather.sun_azimuth_angle = config.get("sun_azimuth", 180.0)
+    world.set_weather(weather)
+
+    blueprint_library = world.get_blueprint_library()
+    spawn_points = world.get_map().get_spawn_points()
+
+    if len(spawn_points) == 0:
+        raise RuntimeError("No spawn points available in CARLA map")
+
+    actors_to_destroy = []
+
+    try:
+        # Spawn ego vehicle with LiDAR sensor
+        ego_bp = blueprint_library.filter("vehicle.tesla.model3")[0]
+        ego_transform = rng.choice(spawn_points)
+        ego_vehicle = world.try_spawn_actor(ego_bp, ego_transform)
+        if ego_vehicle is None:
+            ego_transform = spawn_points[0]
+            ego_vehicle = world.spawn_actor(ego_bp, ego_transform)
+        actors_to_destroy.append(ego_vehicle)
+
+        # Attach LiDAR sensor (64-channel, matching KITTI Velodyne HDL-64E)
+        lidar_bp = blueprint_library.find("sensor.lidar.ray_cast")
+        lidar_bp.set_attribute("channels", "64")
+        lidar_bp.set_attribute("range", "100.0")
+        lidar_bp.set_attribute("points_per_second", "1300000")
+        lidar_bp.set_attribute("rotation_frequency", "20")
+        lidar_bp.set_attribute("upper_fov", "2.0")
+        lidar_bp.set_attribute("lower_fov", "-24.8")
+        # Weather effects on LiDAR
+        lidar_bp.set_attribute("atmosphere_attenuation_rate",
+                               str(0.004 + weather_params["fog_density"] * 0.001))
+        lidar_bp.set_attribute("dropoff_general_rate",
+                               str(0.45 + weather_params["precipitation"] * 0.003))
+
+        lidar_transform = carla.Transform(
+            carla.Location(x=0.0, y=0.0, z=1.8)
+        )
+        lidar_sensor = world.spawn_actor(
+            lidar_bp, lidar_transform, attach_to=ego_vehicle
+        )
+        actors_to_destroy.append(lidar_sensor)
+
+        # Spawn NPC vehicles
+        vehicle_bps = blueprint_library.filter("vehicle.*")
+        available_spawns = [sp for sp in spawn_points
+                           if sp.location.distance(ego_transform.location) > 5.0]
+        rng.shuffle(available_spawns)
+
+        npc_vehicles = []
+        for i in range(min(n_vehicles, len(available_spawns))):
+            bp = rng.choice(vehicle_bps)
+            actor = world.try_spawn_actor(bp, available_spawns[i])
+            if actor is not None:
+                actors_to_destroy.append(actor)
+                npc_vehicles.append(actor)
+
+        # Spawn NPC pedestrians
+        ped_bps = blueprint_library.filter("walker.pedestrian.*")
+        for i in range(n_pedestrians):
+            bp = rng.choice(ped_bps)
+            spawn_loc = carla.Transform()
+            spawn_loc.location = world.get_random_location_from_navigation()
+            if spawn_loc.location is not None:
+                actor = world.try_spawn_actor(bp, spawn_loc)
+                if actor is not None:
+                    actors_to_destroy.append(actor)
+
+        # Capture LiDAR data
+        point_cloud_data = [None]
+
+        def lidar_callback(data):
+            point_cloud_data[0] = data
+
+        lidar_sensor.listen(lidar_callback)
+
+        # Tick the simulation to generate data
+        world.tick()
+        time.sleep(0.1)
+        world.tick()
+        time.sleep(0.5)
+
+        lidar_sensor.stop()
+
+        # Process point cloud
+        if point_cloud_data[0] is not None:
+            raw_data = np.frombuffer(
+                point_cloud_data[0].raw_data, dtype=np.float32
+            ).reshape(-1, 4)
+            # CARLA format: x, y, z, intensity
+            # Convert: CARLA uses left-handed, need right-handed for KITTI
+            points = raw_data.copy()
+            points[:, 1] = -points[:, 1]  # flip Y axis
+        else:
+            points = np.zeros((0, 4), dtype=np.float32)
+
+        # Apply weather augmentation on point cloud (since CARLA LiDAR
+        # doesn't natively model rain/fog effects on returns)
+        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        from sotif_uncertainty.weather_augmentation import augment_weather
+        points = augment_weather(points, weather_params, seed=seed)
+
+        # Extract ground truth bounding boxes
+        gt_boxes = []
+        gt_names = []
+        ego_loc = ego_vehicle.get_transform()
+
+        for npc in npc_vehicles:
+            bb = npc.bounding_box
+            transform = npc.get_transform()
+
+            # Convert to ego LiDAR frame
+            dx = transform.location.x - ego_loc.location.x
+            dy = -(transform.location.y - ego_loc.location.y)
+            dz = transform.location.z - ego_loc.location.z
+
+            extent = bb.extent
+            box_l = extent.x * 2
+            box_w = extent.y * 2
+            box_h = extent.z * 2
+            yaw = -np.radians(transform.rotation.yaw - ego_loc.rotation.yaw)
+
+            gt_boxes.append([dx, dy, dz, box_l, box_w, box_h, yaw])
+            gt_names.append("Car")
+
+        category = TC_CATEGORY_MAP.get(config_name, "other")
+
+        return {
+            "points": points.astype(np.float32),
+            "gt_boxes": np.array(gt_boxes) if gt_boxes else np.zeros((0, 7)),
+            "gt_names": np.array(gt_names) if gt_names else np.array([], dtype=str),
+            "config": config_name,
+            "category": category,
+        }
+
+    finally:
+        # Clean up all spawned actors
+        for actor in reversed(actors_to_destroy):
+            try:
+                actor.destroy()
+            except Exception:
+                pass
+
+
 def make_kitti_calib_file(output_path: str):
     """
     Generate a KITTI-format calibration file for CARLA data.
@@ -747,11 +941,13 @@ def main():
                     seed=seed,
                 )
             else:
-                # CARLA mode would call the CARLA API here
-                # This requires the carla package and a running server
-                print("    CARLA API data collection not implemented in this script.")
-                print("    Use CARLA-KITTI bridge: https://github.com/fnozarian/CARLA-KITTI")
-                sys.exit(1)
+                # CARLA API data collection
+                frame_data = collect_carla_frame(
+                    world, config_name, config,
+                    n_vehicles=np.random.RandomState(seed).randint(3, 12),
+                    n_pedestrians=np.random.RandomState(seed).randint(0, 5),
+                    seed=seed,
+                )
 
             save_frame_kitti_format(
                 frame_data, frame_id, args.output_dir, calib_template

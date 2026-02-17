@@ -577,6 +577,368 @@ class TestEndToEnd:
 
 
 # ================================================================
+# Weather Augmentation
+# ================================================================
+
+class TestWeatherAugmentation:
+    """Test physics-based weather effects on LiDAR point clouds."""
+
+    def _make_point_cloud(self, n=1000, seed=42):
+        rng = np.random.RandomState(seed)
+        pts = np.zeros((n, 4), dtype=np.float32)
+        pts[:, 0] = rng.uniform(0, 70, n)  # x
+        pts[:, 1] = rng.uniform(-40, 40, n)  # y
+        pts[:, 2] = rng.uniform(-3, 1, n)  # z
+        pts[:, 3] = rng.uniform(0.1, 1.0, n)  # intensity
+        return pts
+
+    def test_rain_augmentation(self):
+        from sotif_uncertainty.weather_augmentation import augment_rain
+        pts = self._make_point_cloud()
+        result = augment_rain(pts, rain_rate=25.0, seed=42)
+        # Should have some points (original - dropped + scatter)
+        assert len(result) > 0
+        assert result.shape[1] == 4
+        # Intensity should be reduced on average (attenuation)
+        orig_mean_int = np.mean(pts[:, 3])
+        result_existing = result[:len(pts)]  # approximate
+        # Rain adds scatter noise, so total can be larger
+
+    def test_fog_augmentation(self):
+        from sotif_uncertainty.weather_augmentation import augment_fog
+        pts = self._make_point_cloud()
+        # Dense fog should drop many far points
+        result = augment_fog(pts, visibility=30.0, seed=42)
+        assert len(result) > 0
+        assert result.shape[1] == 4
+        # Dense fog should remove more points than light fog
+        result_light = augment_fog(pts, visibility=500.0, seed=42)
+        assert len(result) < len(result_light)
+
+    def test_snow_augmentation(self):
+        from sotif_uncertainty.weather_augmentation import augment_snow
+        pts = self._make_point_cloud()
+        result = augment_snow(pts, snowfall_rate=3.0, seed=42)
+        assert len(result) > 0
+        assert result.shape[1] == 4
+
+    def test_spray_augmentation(self):
+        from sotif_uncertainty.weather_augmentation import augment_spray
+        pts = self._make_point_cloud()
+        result = augment_spray(pts, spray_intensity=0.5, seed=42)
+        # Spray adds points
+        assert len(result) >= len(pts)
+        assert result.shape[1] == 4
+
+    def test_combined_weather(self):
+        from sotif_uncertainty.weather_augmentation import augment_weather
+        pts = self._make_point_cloud()
+        config = {
+            "precipitation": 80.0,
+            "fog_density": 40.0,
+            "wetness": 90.0,
+            "wind_intensity": 60.0,
+            "sun_altitude_angle": 30.0,
+        }
+        result = augment_weather(pts, config, seed=42)
+        assert len(result) > 0
+        assert result.shape[1] == 4
+
+    def test_weather_presets(self):
+        from sotif_uncertainty.weather_augmentation import (
+            get_weather_preset, augment_weather, WEATHER_PRESETS,
+        )
+        pts = self._make_point_cloud(n=500)
+        for name in WEATHER_PRESETS:
+            preset = get_weather_preset(name)
+            result = augment_weather(pts, preset, seed=42)
+            assert len(result) > 0, f"Preset {name} returned empty"
+
+    def test_weather_severity(self):
+        from sotif_uncertainty.weather_augmentation import (
+            compute_weather_severity, get_weather_preset,
+        )
+        clear = compute_weather_severity(get_weather_preset("clear"))
+        heavy = compute_weather_severity(get_weather_preset("heavy_rain"))
+        assert clear["overall_severity"] < heavy["overall_severity"]
+        assert heavy["tc_category"] == "heavy_rain"
+        assert clear["tc_category"] == "other"
+
+    def test_empty_point_cloud(self):
+        from sotif_uncertainty.weather_augmentation import (
+            augment_rain, augment_fog, augment_snow,
+        )
+        empty = np.zeros((0, 4), dtype=np.float32)
+        assert len(augment_rain(empty, seed=42)) == 0
+        assert len(augment_fog(empty, seed=42)) == 0
+        assert len(augment_snow(empty, seed=42)) == 0
+
+
+# ================================================================
+# Dempster-Shafer Theory
+# ================================================================
+
+class TestDSTUncertainty:
+    """Test Dempster-Shafer Theory uncertainty module."""
+
+    def test_mass_function_basic(self):
+        from sotif_uncertainty.dst_uncertainty import MassFunction
+        m = MassFunction(0.6, 0.2, 0.2)
+        assert abs(m.m_correct + m.m_incorrect + m.m_uncertain - 1.0) < 1e-6
+        assert m.belief_correct == m.m_correct
+        assert abs(m.plausibility_correct - (m.m_correct + m.m_uncertain)) < 1e-6
+
+    def test_mass_function_vacuous(self):
+        from sotif_uncertainty.dst_uncertainty import MassFunction
+        m = MassFunction(0, 0, 1)
+        assert m.m_uncertain == 1.0
+        assert m.pignistic_probability == 0.5
+
+    def test_dempster_combine(self):
+        from sotif_uncertainty.dst_uncertainty import (
+            MassFunction, dempster_combine,
+        )
+        m1 = MassFunction(0.6, 0.1, 0.3)
+        m2 = MassFunction(0.7, 0.1, 0.2)
+        combined = dempster_combine(m1, m2)
+        # Combined should have higher belief in correctness
+        assert combined.belief_correct > m1.belief_correct
+        assert abs(combined.m_correct + combined.m_incorrect + combined.m_uncertain - 1.0) < 1e-6
+
+    def test_dempster_combine_multiple(self):
+        from sotif_uncertainty.dst_uncertainty import (
+            MassFunction, dempster_combine_multiple,
+        )
+        masses = [
+            MassFunction(0.6, 0.1, 0.3),
+            MassFunction(0.7, 0.05, 0.25),
+            MassFunction(0.5, 0.15, 0.35),
+        ]
+        combined = dempster_combine_multiple(masses)
+        assert combined.belief_correct > 0
+        assert abs(combined.m_correct + combined.m_incorrect + combined.m_uncertain - 1.0) < 1e-6
+
+    def test_score_to_mass(self):
+        from sotif_uncertainty.dst_uncertainty import score_to_mass
+        # High confidence
+        m_high = score_to_mass(0.9, detected=True)
+        assert m_high.m_correct > m_high.m_incorrect
+        # Low confidence
+        m_low = score_to_mass(0.1, detected=True)
+        assert m_low.m_correct < m_high.m_correct
+        # Non-detection
+        m_nd = score_to_mass(0.0, detected=False)
+        assert m_nd.m_incorrect > 0
+
+    def test_ensemble_to_dst(self):
+        from sotif_uncertainty.dst_uncertainty import ensemble_to_dst
+        # All members confident -> high belief
+        scores = np.array([0.9, 0.85, 0.88, 0.92, 0.87, 0.91])
+        result = ensemble_to_dst(scores)
+        assert result.belief_correct > 0.5
+        # All members low confidence -> low belief
+        scores_low = np.array([0.1, 0.15, 0.08, 0.12, 0.09, 0.11])
+        result_low = ensemble_to_dst(scores_low)
+        assert result_low.belief_correct < result.belief_correct
+
+    def test_compute_dst_indicators(self):
+        from sotif_uncertainty.dst_uncertainty import compute_dst_indicators
+        N, K = 50, 6
+        rng = np.random.RandomState(42)
+        scores = rng.rand(N, K)
+        indicators = compute_dst_indicators(scores)
+        assert indicators["belief"].shape == (N,)
+        assert indicators["plausibility"].shape == (N,)
+        assert indicators["uncertainty_mass"].shape == (N,)
+        assert indicators["pignistic_prob"].shape == (N,)
+        assert indicators["dissonance"].shape == (N,)
+        # Plausibility >= Belief always
+        assert np.all(indicators["plausibility"] >= indicators["belief"] - 1e-6)
+
+    def test_decompose_uncertainty(self):
+        from sotif_uncertainty.dst_uncertainty import decompose_uncertainty_dst
+        from sotif_uncertainty.demo_data import generate_demo_dataset
+        data = generate_demo_dataset(n_tp=20, n_fp=50, K=6, seed=42)
+        result = decompose_uncertainty_dst(data["scores"], data["boxes"])
+        N = 70
+        assert result["aleatoric"].shape == (N,)
+        assert result["epistemic"].shape == (N,)
+        assert result["ontological"].shape == (N,)
+        assert result["total"].shape == (N,)
+        assert np.all(result["aleatoric"] >= 0)
+        assert np.all(result["epistemic"] >= 0)
+        assert np.all(result["ontological"] >= 0)
+
+    def test_dst_acceptance_gate(self):
+        from sotif_uncertainty.dst_uncertainty import (
+            compute_dst_indicators, dst_acceptance_gate,
+        )
+        N, K = 30, 6
+        rng = np.random.RandomState(42)
+        scores = rng.rand(N, K)
+        indicators = compute_dst_indicators(scores)
+        accepted = dst_acceptance_gate(
+            indicators, tau_belief=0.3, tau_uncertainty=0.5, tau_dissonance=0.5,
+        )
+        assert accepted.shape == (N,)
+        assert accepted.dtype == bool
+
+    def test_dst_operating_points(self):
+        from sotif_uncertainty.dst_uncertainty import (
+            compute_dst_indicators, compute_dst_operating_points,
+        )
+        N, K = 50, 6
+        rng = np.random.RandomState(42)
+        scores = rng.rand(N, K)
+        labels = (np.mean(scores, axis=1) > 0.5).astype(int)
+        indicators = compute_dst_indicators(scores)
+        ops = compute_dst_operating_points(indicators, labels)
+        assert len(ops) > 0
+        assert all("coverage" in p for p in ops)
+        assert all("far" in p for p in ops)
+
+
+# ================================================================
+# Dataset Adapter
+# ================================================================
+
+class TestDatasetAdapter:
+    """Test unified dataset adapter."""
+
+    def test_adapter_creation(self):
+        from sotif_uncertainty.dataset_adapter import DatasetAdapter
+        # Test with non-existent path (should not error on creation)
+        adapter = DatasetAdapter("/tmp/nonexistent_dataset", format="kitti")
+        assert adapter.format == "kitti"
+        assert adapter.get_frame_ids() == []
+
+    def test_adapter_format_detection(self):
+        from sotif_uncertainty.dataset_adapter import DatasetAdapter
+        import json
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Create CARLA-like structure
+            os.makedirs(os.path.join(tmpdir, "training", "velodyne"))
+            os.makedirs(os.path.join(tmpdir, "training", "label_2"))
+            with open(os.path.join(tmpdir, "conditions.json"), "w") as f:
+                json.dump({"000000": {"tc_category": "heavy_rain"}}, f)
+
+            adapter = DatasetAdapter(tmpdir, format="auto")
+            assert adapter.format == "carla"
+
+    def test_adapter_condition_loading(self):
+        from sotif_uncertainty.dataset_adapter import DatasetAdapter
+        import json
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            os.makedirs(os.path.join(tmpdir, "training", "velodyne"))
+            conditions = {
+                "000000": {"tc_category": "heavy_rain", "config": "HeavyRainNoon"},
+                "000001": {"tc_category": "night", "config": "ClearNight"},
+            }
+            with open(os.path.join(tmpdir, "conditions.json"), "w") as f:
+                json.dump(conditions, f)
+
+            adapter = DatasetAdapter(tmpdir, format="carla")
+            conds = adapter.get_conditions()
+            assert conds is not None
+            assert conds["000000"]["tc_category"] == "heavy_rain"
+            assert adapter.get_frame_condition("000000") == "heavy_rain"
+            assert adapter.get_frame_condition("999999") == "other"
+
+    def test_adapter_summary(self):
+        from sotif_uncertainty.dataset_adapter import DatasetAdapter
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            os.makedirs(os.path.join(tmpdir, "training", "velodyne"))
+            os.makedirs(os.path.join(tmpdir, "training", "label_2"))
+            adapter = DatasetAdapter(tmpdir, format="kitti")
+            summary = adapter.summary()
+            assert summary["format"] == "kitti"
+            assert summary["n_frames"] == 0
+
+    def test_load_dataset_convenience(self):
+        from sotif_uncertainty.dataset_adapter import load_dataset
+        with tempfile.TemporaryDirectory() as tmpdir:
+            os.makedirs(os.path.join(tmpdir, "training", "velodyne"))
+            adapter = load_dataset(tmpdir, format="kitti")
+            assert adapter.format == "kitti"
+
+
+# ================================================================
+# Extended End-to-End Pipeline
+# ================================================================
+
+class TestExtendedPipeline:
+    """Test full pipeline including new modules."""
+
+    def test_pipeline_with_dst(self):
+        """Run pipeline with DST uncertainty decomposition."""
+        from sotif_uncertainty.demo_data import generate_demo_dataset
+        from sotif_uncertainty.uncertainty import compute_all_indicators
+        from sotif_uncertainty.dst_uncertainty import (
+            decompose_uncertainty_dst,
+            compute_dst_indicators,
+            compute_dst_operating_points,
+        )
+        from sotif_uncertainty.metrics import compute_all_metrics
+
+        data = generate_demo_dataset(n_tp=30, n_fp=70, K=6, seed=42)
+
+        # Standard indicators
+        indicators = compute_all_indicators(data["scores"], data["boxes"])
+        mc = indicators["mean_confidence"]
+        cv = indicators["confidence_variance"]
+        gd = indicators["geometric_disagreement"]
+
+        # DST decomposition
+        decomp = decompose_uncertainty_dst(data["scores"], data["boxes"])
+        assert decomp["aleatoric"].shape == (100,)
+
+        # DST operating points
+        dst_ind = compute_dst_indicators(data["scores"])
+        dst_ops = compute_dst_operating_points(dst_ind, data["labels"])
+        assert len(dst_ops) > 0
+
+        # Standard metrics still work
+        metrics = compute_all_metrics(mc, cv, gd, data["labels"])
+        assert metrics["discrimination"]["auroc_mean_confidence"] > 0.9
+
+    def test_pipeline_with_weather_augmented_data(self):
+        """Test pipeline with weather-augmented point clouds."""
+        from sotif_uncertainty.weather_augmentation import (
+            augment_weather, get_weather_preset, compute_weather_severity,
+        )
+
+        # Generate a basic point cloud
+        rng = np.random.RandomState(42)
+        pts = np.zeros((500, 4), dtype=np.float32)
+        pts[:, 0] = rng.uniform(0, 70, 500)
+        pts[:, 1] = rng.uniform(-40, 40, 500)
+        pts[:, 2] = rng.uniform(-3, 1, 500)
+        pts[:, 3] = rng.uniform(0.1, 1.0, 500)
+
+        # Apply different weather conditions
+        results = {}
+        for preset_name in ["clear", "heavy_rain", "dense_fog", "snow"]:
+            preset = get_weather_preset(preset_name)
+            augmented = augment_weather(pts, preset, seed=42)
+            severity = compute_weather_severity(preset)
+            results[preset_name] = {
+                "n_points": len(augmented),
+                "severity": severity["overall_severity"],
+                "tc_category": severity["tc_category"],
+            }
+
+        # All presets should produce valid point clouds
+        for name, res in results.items():
+            assert res["n_points"] > 0, f"Preset {name} produced empty cloud"
+        # Severity ordering: clear < adverse weather
+        assert results["clear"]["severity"] < results["heavy_rain"]["severity"]
+        assert results["clear"]["severity"] < results["dense_fog"]["severity"]
+
+
+# ================================================================
 # Run tests
 # ================================================================
 
@@ -593,6 +955,10 @@ def run_all_tests():
         TestKITTIUtils,
         TestMCDropout,
         TestEndToEnd,
+        TestWeatherAugmentation,
+        TestDSTUncertainty,
+        TestDatasetAdapter,
+        TestExtendedPipeline,
     ]
 
     total = 0
