@@ -32,3 +32,9 @@ from sotif_uncertainty.sotif_analysis import (
     rank_triggering_conditions,
     flag_frames,
 )
+from sotif_uncertainty.ensemble import (
+    cluster_detections,
+    clustered_to_pipeline_format,
+    compute_classification_uncertainty,
+    compute_regression_uncertainty,
+)

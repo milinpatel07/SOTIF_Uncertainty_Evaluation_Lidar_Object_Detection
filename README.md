@@ -55,17 +55,21 @@ jupyter notebook notebooks/SOTIF_Uncertainty_Evaluation_Demo.ipynb
 
 ### Option 3: Real Data Pipeline (Requires GPU + KITTI)
 
+See [Real Data Pipeline](#real-data-pipeline) below for the full walkthrough.
+
 ```bash
-# 1. Install OpenPCDet (https://github.com/open-mmlab/OpenPCDet)
-# 2. Download KITTI 3D Object Detection dataset
-# 3. Train ensemble
+# 1. Prepare KITTI dataset
+python scripts/prepare_kitti.py --data_root data/kitti
+
+# 2. Train ensemble (K=6 SECOND detectors with different seeds)
 bash scripts/train_ensemble.sh --seeds 0 1 2 3 4 5
 
-# 4. Run inference
+# 3. Run inference with DBSCAN clustering
 python scripts/run_inference.py \
-    --ckpt_dirs output/ensemble/seed_*
+    --ckpt_dirs output/ensemble/seed_* \
+    --gt_path data/kitti/training/label_2
 
-# 5. Evaluate
+# 4. Full evaluation (or use pre-computed pickle from step 3)
 python scripts/evaluate.py --input results/ensemble_results.pkl
 ```
 
@@ -74,22 +78,25 @@ python scripts/evaluate.py --input results/ensemble_results.pkl
 ```
 .
 ├── sotif_uncertainty/          # Core Python package
-│   ├── __init__.py
+│   ├── __init__.py             # Public API exports
 │   ├── uncertainty.py          # Stage 2: Uncertainty indicators (Eqs. 1-3)
-│   ├── matching.py             # Stage 3: TP/FP/FN greedy matching
-│   ├── metrics.py              # Stage 4: AUROC, AURC, ECE, NLL, Brier
-│   ├── sotif_analysis.py       # Stage 5: TC ranking, frame flags, gates
-│   ├── visualization.py        # All paper figures
-│   └── demo_data.py            # Synthetic data generator
+│   ├── ensemble.py             # DBSCAN clustering + uncertainty decomposition
+│   ├── matching.py             # Stage 3: TP/FP/FN greedy matching (BEV IoU ≥ 0.5)
+│   ├── metrics.py              # Stage 4: AUROC, AURC, ECE, NLL, Brier Score
+│   ├── sotif_analysis.py       # Stage 5: TC ranking, frame flags, acceptance gates
+│   ├── visualization.py        # 13 publication-quality figures
+│   └── demo_data.py            # Synthetic data generator (matches paper stats)
 ├── notebooks/
-│   └── SOTIF_Uncertainty_Evaluation_Demo.ipynb  # Main demo notebook
+│   └── SOTIF_Uncertainty_Evaluation_Demo.ipynb  # Interactive Colab notebook
 ├── scripts/
-│   ├── evaluate.py             # Standalone evaluation script
-│   ├── train_ensemble.sh       # Train K SECOND models
-│   └── run_inference.py        # Run ensemble inference
-├── Analysis/                   # Generated figures
+│   ├── evaluate.py             # Standalone evaluation (Stages 2-5)
+│   ├── train_ensemble.sh       # Train K SECOND models via OpenPCDet
+│   ├── run_inference.py        # Ensemble inference + DBSCAN + evaluation
+│   └── prepare_kitti.py        # Download and prepare KITTI dataset
+├── Analysis/                   # Pre-generated figures (13 plots)
 ├── data/                       # Dataset directory (not tracked)
 ├── requirements.txt
+├── pyproject.toml
 ├── setup.py
 └── LICENSE
 ```
@@ -106,7 +113,7 @@ LiDAR Frame + K Ensemble Members
     └────┬────┘
          │  K × D^(k) detections
     ┌────▼────┐
-    │ Stage 2  │  Cross-Member Association + Uncertainty Indicators
+    │ Stage 2  │  DBSCAN Clustering + Uncertainty Indicators
     └────┬────┘    ├─ Mean confidence (s̄ⱼ): existence uncertainty
          │         ├─ Confidence variance (σ²ₛ,ⱼ): epistemic uncertainty
          │         └─ Geometric disagreement (d_iou,j): localisation uncertainty
@@ -143,6 +150,182 @@ G(s̄ⱼ, σ²ₛ,ⱼ, d_iou,j) = [s̄ⱼ ≥ τₛ] ∧ [σ²ₛ,ⱼ ≤ τᵥ]
 
 The multi-indicator gate achieves zero FAR at a lower confidence threshold by using variance as an additional filter.
 
+### DBSCAN Detection Association
+
+Detections from K ensemble members are clustered using DBSCAN on a BEV IoU distance matrix (following [LiDAR-MIMO](https://github.com/mpitropov/LiDAR-MIMO)):
+
+1. For each frame, collect all detections from all K members
+2. Compute pairwise `(1 - BEV IoU)` distance matrix
+3. Run DBSCAN with `eps = 1 - iou_threshold` (default 0.5)
+4. Three voting strategies control `min_samples`:
+   - **Affirmative**: `min_samples=1` (keep all detections)
+   - **Consensus**: `min_samples=K//2+1` (majority must agree)
+   - **Unanimous**: `min_samples=K` (all members must agree)
+5. Aggregate cluster: mean box position, yaw from highest-confidence member
+
+## Generated Figures
+
+The pipeline produces 13 publication-quality figures:
+
+| Figure | Description | Paper Reference |
+|---|---|---|
+| Reliability diagram | Calibration: predicted confidence vs. actual accuracy | Section 5.3 |
+| Risk-coverage curve | Selective prediction: risk reduction with coverage | Section 5.3 |
+| Confidence-variance scatter | TP/FP separation in uncertainty space | Section 5.2 |
+| ROC curves | Discrimination for all three indicators | Table 3 |
+| Frame risk scatter | Per-frame mean confidence vs. variance | Section 5.5 |
+| TC ranking bar chart | Triggering condition FP share ranking | Table 7 |
+| Operating points comparison | Coverage and FAR at multiple thresholds | Table 6 |
+| ISO 21448 scenario grid | SOTIF Area 1-4 mapping | Figure 1 |
+| Indicator distributions | Histogram of each indicator by TP/FP | Extended |
+| Condition boxplots | Per-condition score and variance distributions | Extended |
+| Member agreement heatmap | Score correlation across ensemble members | Extended |
+| Condition breakdown | Stacked bar chart of TP/FP by environment | Extended |
+| Operating point heatmap | 2D threshold sweep (confidence × variance) | Extended |
+
+All figures are saved to `Analysis/` when running `scripts/evaluate.py`.
+
+## Real Data Pipeline
+
+### Prerequisites
+
+| Component | Version | Purpose |
+|---|---|---|
+| Python | >= 3.8 | Runtime |
+| PyTorch | >= 1.10 | Training and inference |
+| CUDA | 11.x | GPU acceleration |
+| spconv | v2.x | Sparse convolutions for voxel backbone |
+| [OpenPCDet](https://github.com/open-mmlab/OpenPCDet) | 0.6+ | SECOND detector framework |
+
+### Step 1: Install OpenPCDet
+
+```bash
+git clone https://github.com/open-mmlab/OpenPCDet.git
+cd OpenPCDet
+pip install -r requirements.txt
+python setup.py develop
+
+# Verify installation
+python -c "from pcdet.models import build_network; print('OpenPCDet OK')"
+```
+
+### Step 2: Prepare KITTI Dataset
+
+```bash
+# Automated download and preparation
+python scripts/prepare_kitti.py --data_root data/kitti
+
+# Or download manually from:
+# https://www.cvlibs.net/datasets/kitti/eval_object.php?obj_benchmark=3d
+# Components needed: velodyne (29 GB), labels (5 MB), calib (16 MB)
+```
+
+Expected directory structure:
+```
+data/kitti/
+├── training/
+│   ├── velodyne/     # 7481 .bin point cloud files
+│   ├── label_2/      # 7481 .txt label files
+│   ├── calib/        # 7481 .txt calibration files
+│   └── image_2/      # 7481 .png images (optional)
+├── testing/
+│   ├── velodyne/     # 7518 .bin point cloud files
+│   └── calib/        # 7518 .txt calibration files
+└── ImageSets/
+    ├── train.txt     # 3712 training frame IDs
+    ├── val.txt       # 3769 validation frame IDs
+    └── test.txt      # 7518 test frame IDs
+```
+
+Then create OpenPCDet data info files:
+```bash
+cd OpenPCDet
+python -m pcdet.datasets.kitti.kitti_dataset create_kitti_infos \
+    tools/cfgs/dataset_configs/kitti_dataset.yaml
+```
+
+### Step 3: Train Ensemble (K=6 SECOND Detectors)
+
+```bash
+# Train 6 members with different random seeds
+bash scripts/train_ensemble.sh --seeds 0 1 2 3 4 5
+
+# Custom configuration
+bash scripts/train_ensemble.sh \
+    --seeds 0 1 2 3 4 5 \
+    --epochs 80 \
+    --batch_size 4 \
+    --openpcdet_root /path/to/OpenPCDet \
+    --num_gpus 1
+```
+
+Each member trains the same SECOND architecture (`MeanVFE -> VoxelBackBone8x -> HeightCompression -> BaseBEVBackbone -> AnchorHeadSingle`) with identical hyperparameters, differing only in random seed. Training takes approximately 2-4 hours per member on a single GPU.
+
+**Note on random seeds**: Standard OpenPCDet uses a hardcoded seed of 666. The training script passes `--set OPTIMIZATION.SEED <seed>` which works with LiDAR-MIMO's OpenPCDet fork. For standard OpenPCDet, modify `pcdet/utils/common_utils.py`:
+
+```python
+def set_random_seed(seed):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+```
+
+### Step 4: Run Ensemble Inference
+
+```bash
+# Full pipeline: inference + DBSCAN clustering + GT matching + evaluation
+python scripts/run_inference.py \
+    --ckpt_dirs output/ensemble/seed_0 output/ensemble/seed_1 \
+                output/ensemble/seed_2 output/ensemble/seed_3 \
+                output/ensemble/seed_4 output/ensemble/seed_5 \
+    --data_path data/kitti \
+    --split val \
+    --gt_path data/kitti/training/label_2 \
+    --voting consensus \
+    --output_dir results/
+
+# Or use pre-computed prediction pickles (from OpenPCDet eval)
+python scripts/run_inference.py \
+    --pkl_files results/seed_0.pkl results/seed_1.pkl \
+               results/seed_2.pkl results/seed_3.pkl \
+               results/seed_4.pkl results/seed_5.pkl \
+    --gt_path data/kitti/training/label_2
+```
+
+**Voting strategies**:
+- `--voting affirmative`: Keep any detection from any member (high recall, more FP)
+- `--voting consensus`: Require majority agreement (balanced)
+- `--voting unanimous`: Require all members to detect (high precision, lower recall)
+
+### Step 5: Evaluate
+
+```bash
+# Standalone evaluation with figures
+python scripts/evaluate.py --input results/ensemble_results.pkl
+
+# Or open the notebook for interactive analysis
+jupyter notebook notebooks/SOTIF_Uncertainty_Evaluation_Demo.ipynb
+```
+
+### Using Pre-Computed Prediction Pickles
+
+If you already have OpenPCDet prediction files (`result.pkl` from `eval_utils.eval_one_epoch()`), you can skip training and inference:
+
+```python
+# OpenPCDet result.pkl format: list[dict], one dict per frame
+# Each dict: {'name', 'score', 'boxes_lidar', 'pred_labels', ...}
+
+# Load and run through the pipeline:
+python scripts/run_inference.py \
+    --pkl_files member_0/result.pkl member_1/result.pkl \
+                member_2/result.pkl member_3/result.pkl \
+                member_4/result.pkl member_5/result.pkl \
+    --gt_path data/kitti/training/label_2
+```
+
 ## Available Datasets for Reproduction
 
 | Dataset | Size | Format | Weather Conditions | Access |
@@ -155,6 +338,16 @@ The multi-indicator gate achieves zero FAR at a lower confidence threshold by us
 
 For the paper's case study, data was generated using CARLA with 22 environmental configurations (Table 2 in paper).
 
+## Related Repositories
+
+| Repository | Relevance |
+|---|---|
+| [OpenPCDet](https://github.com/open-mmlab/OpenPCDet) | SECOND detector training/inference framework |
+| [LiDAR-MIMO](https://github.com/mpitropov/LiDAR-MIMO) | Ensemble training + DBSCAN clustering patterns |
+| [uncertainty_eval](https://github.com/mpitropov/uncertainty_eval) | Scoring rules (NLL, Brier, Energy Score) for 3D detection |
+| [probdet](https://github.com/asharakeh/probdet) | Probabilistic object detection evaluation |
+| [pod_compare](https://github.com/asharakeh/pod_compare) | Comparative study of ensemble strategies |
+
 ## Dependencies
 
 **Demo mode** (synthetic data, Colab-compatible):
@@ -162,10 +355,11 @@ For the paper's case study, data was generated using CARLA with 22 environmental
 - matplotlib >= 3.4
 
 **Full pipeline** (real data, requires GPU):
-- [OpenPCDet](https://github.com/open-mmlab/OpenPCDet)
+- [OpenPCDet](https://github.com/open-mmlab/OpenPCDet) >= 0.6
 - PyTorch >= 1.10
 - spconv v2.x
 - CUDA 11.x
+- scikit-learn (for DBSCAN clustering)
 
 ## Citation
 
@@ -189,6 +383,7 @@ If you use this methodology or code, please cite:
 - Lakshminarayanan et al. (2017) - Simple and Scalable Predictive Uncertainty Estimation using Deep Ensembles
 - Feng et al. (2018, 2021) - Uncertainty estimation for LiDAR 3D detection
 - Yan et al. (2018) - SECOND: Sparsely Embedded Convolutional Detection
+- Pitropov et al. (2022) - LiDAR-MIMO: Efficient Uncertainty Estimation for LiDAR 3D Object Detection
 - Patel and Jung (2024) - SOTIF-relevant evaluation of LiDAR detectors in CARLA
 - OpenPCDet (2020) - Open-source 3D object detection codebase
 

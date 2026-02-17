@@ -197,6 +197,9 @@ def main():
         tc_results=tc_results,
         operating_points=all_points,
         output_dir=args.output_dir,
+        scores=data["scores"] if args.input is None else None,
+        geo_disagree=geo_disagree,
+        conditions=conditions if args.input is None else None,
     )
 
     print(f"  Saved {len(figures)} figures to {args.output_dir}/")
