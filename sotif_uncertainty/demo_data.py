@@ -396,6 +396,12 @@ def generate_frame_assignments(
         cat_mask = frame_categories == cat
         cat_frames[cat] = np.where(cat_mask)[0]
 
+    # Assign FP to frames (preferring frames with matching conditions)
+    for i in range(n_fp):
+        fp_idx = n_tp + i
+        # Random frame assignment (simplified; real pipeline uses condition matching)
+        frame_ids[fp_idx] = rng.choice(n_frames)
+
     return frame_ids, frame_configs
 
 

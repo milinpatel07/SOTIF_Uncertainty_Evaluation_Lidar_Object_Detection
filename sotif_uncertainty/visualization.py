@@ -803,10 +803,11 @@ def generate_all_figures(
     # ============================================================
     # Analysis figures
     # ============================================================
-    figures["tc_ranking"] = plot_tc_ranking(
-        tc_results,
-        save_path=os.path.join(output_dir, "tc_ranking.png"),
-    )
+    if tc_results:
+        figures["tc_ranking"] = plot_tc_ranking(
+            tc_results,
+            save_path=os.path.join(output_dir, "tc_ranking.png"),
+        )
 
     figures["operating_points"] = plot_operating_points_comparison(
         operating_points,
@@ -815,6 +816,29 @@ def generate_all_figures(
 
     figures["iso21448_grid"] = plot_iso21448_scenario_grid(
         save_path=os.path.join(output_dir, "iso21448_scenario_grid.png"),
+    )
+
+    # ROC curves for all indicators
+    disc = metrics["discrimination"]
+    roc_data = {
+        "Mean confidence": (
+            disc["roc_fpr"], disc["roc_tpr"], disc["auroc_mean_confidence"]
+        ),
+    }
+    if geo_disagree is not None:
+        from sotif_uncertainty.metrics import compute_auroc_with_curve
+        auroc_var, fpr_var, tpr_var = compute_auroc_with_curve(
+            conf_var, labels, higher_is_correct=False
+        )
+        auroc_geo, fpr_geo, tpr_geo = compute_auroc_with_curve(
+            geo_disagree, labels, higher_is_correct=False
+        )
+        roc_data["Confidence variance"] = (fpr_var, tpr_var, auroc_var)
+        roc_data["Geometric disagreement"] = (fpr_geo, tpr_geo, auroc_geo)
+
+    figures["roc_curves"] = plot_roc_curves(
+        roc_data,
+        save_path=os.path.join(output_dir, "roc_curves.png"),
     )
 
     # ============================================================
@@ -848,11 +872,12 @@ def generate_all_figures(
             save_path=os.path.join(output_dir, "member_agreement.png"),
         )
 
-    # Summary dashboard
-    figures["summary_dashboard"] = plot_summary_dashboard(
-        metrics, mean_conf, conf_var, labels, tc_results,
-        save_path=os.path.join(output_dir, "summary_dashboard.png"),
-    )
+    # Summary dashboard (requires at least 2 TC results for text display)
+    if tc_results and len(tc_results) >= 2:
+        figures["summary_dashboard"] = plot_summary_dashboard(
+            metrics, mean_conf, conf_var, labels, tc_results,
+            save_path=os.path.join(output_dir, "summary_dashboard.png"),
+        )
 
     plt.close("all")
     return figures

@@ -72,10 +72,63 @@ def main():
         scores = results["scores"]
         boxes = results["boxes"]
         frame_ids = results["frame_ids"]
-        # Ground truth matching would need to be done here
-        print("WARNING: Ground truth matching for real data not yet implemented.")
-        print("Please use the notebook for real data evaluation.")
-        return
+
+        # Check if labels are already in the results (from run_inference.py)
+        if "labels" in results:
+            labels = results["labels"]
+            print(f"  Labels found in results: {np.sum(labels==1)} TP, {np.sum(labels==0)} FP")
+        elif args.gt_path is not None:
+            # Perform GT matching using provided labels
+            print(f"  Matching to ground truth at: {args.gt_path}")
+            from sotif_uncertainty.uncertainty import compute_all_indicators, aggregate_box
+            from sotif_uncertainty.matching import greedy_match
+
+            indicators_tmp = compute_all_indicators(scores, boxes)
+            mean_conf_tmp = indicators_tmp["mean_confidence"]
+            agg_boxes = aggregate_box(boxes)
+
+            labels = np.zeros(len(scores), dtype=int)
+            unique_frames = np.unique(frame_ids)
+            tp_total, fp_total, fn_total = 0, 0, 0
+
+            for fid in unique_frames:
+                mask = frame_ids == fid
+                frame_boxes = agg_boxes[mask]
+                frame_scores = mean_conf_tmp[mask]
+
+                # Load GT for this frame
+                gt_file = os.path.join(args.gt_path, f"{fid}.txt")
+                gt_boxes_list = []
+                if os.path.exists(gt_file):
+                    with open(gt_file, "r") as f:
+                        for line in f:
+                            parts = line.strip().split()
+                            if len(parts) >= 15 and parts[0] in ("Car", "Pedestrian", "Cyclist"):
+                                h, w, l = float(parts[8]), float(parts[9]), float(parts[10])
+                                x, y, z = float(parts[11]), float(parts[12]), float(parts[13])
+                                ry = float(parts[14])
+                                gt_boxes_list.append([x, y, z, w, l, h, ry])
+
+                gt_boxes = np.array(gt_boxes_list) if gt_boxes_list else np.zeros((0, 7))
+
+                if len(frame_boxes) == 0 and len(gt_boxes) == 0:
+                    continue
+
+                match_result = greedy_match(frame_boxes, frame_scores, gt_boxes, iou_threshold=0.5)
+                labels[mask] = match_result["labels"]
+                tp_total += match_result["tp_count"]
+                fp_total += match_result["fp_count"]
+                fn_total += match_result["fn_count"]
+
+            print(f"  Matched: {tp_total} TP, {fp_total} FP, {fn_total} FN")
+        else:
+            print("ERROR: --input requires either labels in the pickle or --gt_path.")
+            print("  Option 1: Use run_inference.py with --gt_path to include labels in results")
+            print("  Option 2: Provide --gt_path data/kitti/training/label_2 to this script")
+            sys.exit(1)
+
+        # Conditions are not available for real data unless stored
+        conditions = results.get("conditions", None)
     else:
         print("Using synthetic demo data (matching paper statistics).")
         from sotif_uncertainty.demo_data import generate_demo_dataset
@@ -161,16 +214,20 @@ def main():
         print(f"  {p['gate']:<35} {p['coverage']:>6.3f} {p['retained']:>5d} "
               f"{p['fp']:>4d} {p['far']:>8.3f}")
 
-    # TC ranking (Table 7)
-    tc_results = rank_triggering_conditions(conditions, labels, mean_conf, conf_var)
+    # TC ranking (Table 7) -- only if conditions are available
+    tc_results = []
+    if conditions is not None:
+        tc_results = rank_triggering_conditions(conditions, labels, mean_conf, conf_var)
 
-    print("\n  Triggering Condition Ranking (Table 7):")
-    print(f"  {'Condition':<18} {'FP Share':>10} {'Mean s (FP)':>12} {'Mean var (FP)':>14}")
-    print("  " + "-" * 56)
-    for tc in tc_results:
-        conf_str = f"{tc['mean_conf_fp']:.2f}" if not np.isnan(tc['mean_conf_fp']) else "N/A"
-        var_str = f"{tc['mean_var_fp']:.4f}" if not np.isnan(tc['mean_var_fp']) else "N/A"
-        print(f"  {tc['condition']:<18} {tc['fp_share']:>10.1%} {conf_str:>12} {var_str:>14}")
+        print("\n  Triggering Condition Ranking (Table 7):")
+        print(f"  {'Condition':<18} {'FP Share':>10} {'Mean s (FP)':>12} {'Mean var (FP)':>14}")
+        print("  " + "-" * 56)
+        for tc in tc_results:
+            conf_str = f"{tc['mean_conf_fp']:.2f}" if not np.isnan(tc['mean_conf_fp']) else "N/A"
+            var_str = f"{tc['mean_var_fp']:.4f}" if not np.isnan(tc['mean_var_fp']) else "N/A"
+            print(f"  {tc['condition']:<18} {tc['fp_share']:>10.1%} {conf_str:>12} {var_str:>14}")
+    else:
+        print("\n  TC ranking: skipped (no condition labels available)")
 
     # Frame flags
     flag_results = flag_frames(frame_ids, labels, conf_var)
@@ -197,9 +254,9 @@ def main():
         tc_results=tc_results,
         operating_points=all_points,
         output_dir=args.output_dir,
-        scores=data["scores"] if args.input is None else None,
+        scores=scores,
         geo_disagree=geo_disagree,
-        conditions=conditions if args.input is None else None,
+        conditions=conditions,
     )
 
     print(f"  Saved {len(figures)} figures to {args.output_dir}/")
