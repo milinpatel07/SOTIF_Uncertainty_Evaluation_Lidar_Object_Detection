@@ -3,13 +3,17 @@
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/milinpatel07/SOTIF_Uncertainty_Evaluation_Lidar_Object_Detection/blob/main/notebooks/SOTIF_Uncertainty_Evaluation_Demo.ipynb)
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-33%2F33%20passed-brightgreen)](tests/test_pipeline.py)
+[![Tests](https://img.shields.io/badge/tests-58%2F58%20passed-brightgreen)](tests/test_pipeline.py)
 
-Evaluation methodology for determining whether prediction uncertainty from ensemble-based LiDAR object detection supports **ISO 21448 (SOTIF)** analysis. This repository provides the complete pipeline from the paper:
+Evaluation methodology for determining whether prediction uncertainty from ensemble-based LiDAR object detection supports **ISO 21448 (SOTIF)** analysis. This repository provides the complete pipeline from the papers:
 
 > **Uncertainty Evaluation to Support Safety of the Intended Functionality Analysis for Identifying Performance Insufficiencies in ML-Based LiDAR Object Detection**
 >
-> Milin Patel and Rolf Jung, Kempten University of Applied Sciences
+> Milin Patel and Rolf Jung, Kempten University of Applied Sciences (2026)
+
+> **Uncertainty Representation in a SOTIF-Related Use Case with Dempster-Shafer Theory for LiDAR Sensor-Based Object Detection**
+>
+> Milin Patel and Rolf Jung, Kempten University of Applied Sciences (2025), [arXiv:2503.02087](https://arxiv.org/abs/2503.02087)
 
 ## Overview
 
@@ -23,15 +27,29 @@ This methodology uses prediction uncertainty from deep ensembles to support thre
 | Triggering condition ranking | Clause 7 | Conditions ranked by FP share and uncertainty |
 | Acceptance criteria documentation | Clause 11 | Operating points with coverage and FAR |
 
-### Key Results (Case Study)
+### Key Results
+
+**KITTI Real-World (Paper Statistics):**
 
 | Indicator | AUROC |
 |---|---|
 | Mean confidence | 0.999 |
-| Confidence variance | 0.984 |
-| Geometric disagreement | 0.891 |
+| Confidence variance | 0.889 |
+| Geometric disagreement | 0.912 |
 
-At confidence threshold 0.70: **26.2% coverage with zero false positives**.
+At confidence threshold 0.70: **25.8% coverage with zero false positives**.
+
+**CARLA Synthetic (547 frames, 22 weather configs):**
+
+| Indicator | AUROC |
+|---|---|
+| Mean confidence | 0.895 |
+| Confidence variance | 0.738 |
+| Geometric disagreement | 0.974 |
+
+Multi-indicator gate (s>=0.35 & d<=0.49): **38.3% coverage with zero false positives**.
+
+See the full cross-dataset comparison in [`reports/evaluation_report/`](reports/evaluation_report/).
 
 ## Quick Start
 
@@ -50,7 +68,10 @@ pip install -e .
 # Run the evaluation with synthetic demo data
 python scripts/evaluate.py
 
-# Run tests to verify everything works
+# Run end-to-end pipeline (demo mode with figures)
+python scripts/run_pipeline.py --mode demo --output_dir results/demo
+
+# Run tests to verify everything works (58 tests)
 python tests/test_pipeline.py
 
 # Or open the notebook locally
@@ -80,7 +101,24 @@ python scripts/evaluate.py \
     --calib_path data/kitti/training/calib
 ```
 
-### Option 4: CARLA Simulation Data
+### Option 4: Cross-Dataset Evaluation (CARLA + KITTI)
+
+```bash
+# Clone the SOTIF-PCOD dataset (547 CARLA frames, 22 weather configs)
+git clone https://github.com/milinpatel07/SOTIF-PCOD.git
+
+# Run cross-dataset evaluation with report generation
+python scripts/execute_evaluation.py \
+    --carla_root SOTIF-PCOD/SOTIF_Scenario_Dataset \
+    --output_dir reports/evaluation_report
+
+# This produces:
+#   - 13 CARLA figures + 13 KITTI figures + 5 comparison figures
+#   - SOTIF_Evaluation_Report.md with full analysis tables
+#   - comparison_summary.json with machine-readable metrics
+```
+
+### Option 5: CARLA Simulation Data (Custom Generation)
 
 ```bash
 # Generate synthetic LiDAR data with 22 weather configs (no CARLA needed)
@@ -99,29 +137,43 @@ python scripts/evaluate.py \
 
 ```
 .
-├── sotif_uncertainty/          # Core Python package
-│   ├── __init__.py             # Public API exports
-│   ├── uncertainty.py          # Stage 2: Uncertainty indicators (Eqs. 1-3)
-│   ├── ensemble.py             # DBSCAN clustering + uncertainty decomposition
-│   ├── matching.py             # Stage 3: TP/FP/FN greedy matching (BEV IoU >= 0.5)
-│   ├── metrics.py              # Stage 4: AUROC, AURC, ECE, NLL, Brier Score
-│   ├── sotif_analysis.py       # Stage 5: TC ranking, frame flags, acceptance gates
-│   ├── visualization.py        # 13 publication-quality figures
-│   ├── demo_data.py            # Synthetic data generator (matches paper stats)
-│   ├── kitti_utils.py          # KITTI calibration, label loading, point cloud I/O
-│   └── mc_dropout.py           # MC Dropout uncertainty (alternative to ensembles)
+├── sotif_uncertainty/              # Core Python package (v2.0.0)
+│   ├── __init__.py                 # Public API exports
+│   ├── uncertainty.py              # Stage 2: Uncertainty indicators (Eqs. 1-3)
+│   ├── ensemble.py                 # DBSCAN clustering + uncertainty decomposition
+│   ├── matching.py                 # Stage 3: TP/FP/FN greedy matching (BEV IoU >= 0.5)
+│   ├── metrics.py                  # Stage 4: AUROC, AURC, ECE, NLL, Brier Score
+│   ├── sotif_analysis.py           # Stage 5: TC ranking, frame flags, acceptance gates
+│   ├── visualization.py            # 13 publication-quality figures
+│   ├── demo_data.py                # Synthetic data generator (matches paper stats)
+│   ├── kitti_utils.py              # KITTI calibration, label loading, point cloud I/O
+│   ├── mc_dropout.py               # MC Dropout uncertainty (alternative to ensembles)
+│   ├── weather_augmentation.py     # Physics-based LiDAR weather effects (rain/fog/snow/spray)
+│   ├── dst_uncertainty.py          # Dempster-Shafer Theory uncertainty decomposition
+│   └── dataset_adapter.py          # Unified adapter for KITTI/CARLA/custom datasets
 ├── notebooks/
 │   └── SOTIF_Uncertainty_Evaluation_Demo.ipynb  # Interactive Colab notebook
 ├── scripts/
-│   ├── evaluate.py             # Standalone evaluation (Stages 2-5)
-│   ├── train_ensemble.sh       # Train K SECOND models via OpenPCDet
-│   ├── run_inference.py        # Ensemble inference + DBSCAN + evaluation
-│   ├── prepare_kitti.py        # Download and prepare KITTI dataset
-│   └── generate_carla_data.py  # Generate CARLA simulation data
+│   ├── evaluate.py                 # Standalone evaluation (Stages 2-5)
+│   ├── run_pipeline.py             # End-to-end pipeline orchestrator (demo/kitti/carla modes)
+│   ├── execute_evaluation.py       # Cross-dataset SOTIF evaluation with report generation
+│   ├── train_ensemble.sh           # Train K SECOND models via OpenPCDet
+│   ├── run_inference.py            # Ensemble inference + DBSCAN + evaluation
+│   ├── prepare_kitti.py            # Download and prepare KITTI dataset
+│   └── generate_carla_data.py      # Generate CARLA simulation data
+├── configs/
+│   └── second_sotif_ensemble.yaml  # OpenPCDet SECOND detector config for K=6 ensemble
 ├── tests/
-│   └── test_pipeline.py        # 33 tests covering all pipeline stages
-├── Analysis/                   # Pre-generated figures (13 plots)
-├── data/                       # Dataset directory (not tracked)
+│   └── test_pipeline.py            # 58 tests covering all pipeline stages
+├── reports/
+│   └── evaluation_report/          # Cross-dataset evaluation results
+│       ├── SOTIF_Evaluation_Report.md  # Implementation report with tables and analysis
+│       ├── comparison_summary.json     # Machine-readable results summary
+│       ├── carla_synthetic/            # 13 CARLA figures
+│       ├── kitti_real_world/           # 13 KITTI figures
+│       └── comparison/                 # 5 cross-dataset comparison figures
+├── Analysis/                       # Pre-generated figures (13 plots)
+├── data/                           # Dataset directory (not tracked)
 ├── requirements.txt
 ├── pyproject.toml
 ├── setup.py
@@ -193,6 +245,31 @@ Detections from K ensemble members are clustered using DBSCAN on a BEV IoU dista
 ### MC Dropout Alternative
 
 As an alternative to deep ensembles, the `mc_dropout` module provides Monte Carlo Dropout uncertainty estimation using a single model with K stochastic forward passes. This requires only one trained model but typically yields lower uncertainty quality (see notebook Section 13 for comparison).
+
+### Dempster-Shafer Theory Uncertainty Decomposition
+
+The `dst_uncertainty` module implements evidence-based uncertainty decomposition following the second paper (Patel & Jung, 2025). Ensemble member scores are converted to Dempster-Shafer mass functions and combined using Dempster's rule to decompose total uncertainty into three components:
+
+| Component | Definition | Interpretation |
+|---|---|---|
+| Aleatoric | Shannon entropy of pignistic probability | Irreducible sensor noise |
+| Epistemic | Plausibility - Belief interval width | Model ignorance / insufficient training data |
+| Ontological | Combined conflict mass | Evidence for unknown unknowns |
+
+Key finding: Epistemic uncertainty is the primary discriminator between TP and FP, as ensemble members disagree more on incorrect detections.
+
+### Physics-Based Weather Augmentation
+
+The `weather_augmentation` module applies physically-motivated weather effects to LiDAR point clouds for SOTIF triggering condition analysis:
+
+| Effect | Physical Model | Parameter |
+|---|---|---|
+| Rain | Beer-Lambert attenuation + random droplet hits | `intensity` (0-1) |
+| Fog | Koschmieder's law (visibility-range extinction) | `density` (0-1) |
+| Snow | Geometric occlusion + accumulated layer | `intensity` (0-1) |
+| Spray | Road-surface water splash from nearby vehicles | `amount` (0-1) |
+
+Seven built-in presets (clear, light_rain, heavy_rain, light_fog, dense_fog, snow, extreme) and severity scoring enable systematic triggering condition evaluation.
 
 ## Generated Figures
 
@@ -405,7 +482,7 @@ voxels, coords, num_pts = voxelize_point_cloud(points)
 
 ## Testing
 
-Run the full test suite (33 tests covering all pipeline stages):
+Run the full test suite (58 tests covering all pipeline stages):
 
 ```bash
 python tests/test_pipeline.py
@@ -415,17 +492,29 @@ pip install pytest
 pytest tests/ -v
 ```
 
+Test coverage includes:
+- Core uncertainty indicators (Eqs. 1-3)
+- DBSCAN clustering and ensemble association
+- TP/FP matching at BEV IoU >= 0.5
+- AUROC, ECE, NLL, Brier Score, AURC metrics
+- SOTIF analysis (TC ranking, acceptance gates, frame triage)
+- Weather augmentation (rain, fog, snow, spray, presets, severity)
+- Dempster-Shafer Theory (mass functions, combination, decomposition, gates)
+- Dataset adapter (KITTI/CARLA format detection, conditions loading)
+- End-to-end pipeline with DST and weather augmentation
+
 ## Available Datasets for Reproduction
 
 | Dataset | Size | Format | Weather Conditions | Access |
 |---|---|---|---|---|
+| **SOTIF-PCOD** | 547 frames | KITTI | 22 CARLA weather configs | Free ([GitHub](https://github.com/milinpatel07/SOTIF-PCOD)) |
 | **KITTI** | ~29 GB | Native KITTI | Clear only | Free ([cvlibs.net](https://www.cvlibs.net/datasets/kitti/eval_object.php?obj_benchmark=3d)) |
 | **nuScenes mini** | ~4 GB | Convertible | Rain, night (19%/12%) | Free ([nuscenes.org](https://www.nuscenes.org/nuscenes)) |
 | **MultiFog KITTI** | Varies | KITTI | Synthetic fog | Free ([link](https://maiminh1996.github.io/multifogkitti/)) |
 | **CADC** | ~7K frames | Custom | Snow/winter | Free ([cadcd.uwaterloo.ca](http://cadcd.uwaterloo.ca/)) |
 | **CARLA** | Custom | KITTI | Any (simulated) | Free ([carla.org](https://carla.org/)) |
 
-For the paper's case study, data was generated using CARLA with 22 environmental configurations (Table 2 in paper). Use `scripts/generate_carla_data.py` to generate equivalent data.
+The **SOTIF-PCOD** dataset provides 547 CARLA-generated LiDAR frames in KITTI format across 22 weather configurations (7 noon + 7 sunset + 7 night + DustStorm) on a multi-lane highway scenario (Town04). It includes pre-generated OpenPCDet info pickles for immediate evaluation. Use `scripts/execute_evaluation.py` for cross-dataset analysis.
 
 ## Related Repositories
 
@@ -463,6 +552,14 @@ If you use this methodology or code, please cite:
   year={2026},
   institution={Kempten University of Applied Sciences}
 }
+
+@article{patel2025dst,
+  title={Uncertainty Representation in a SOTIF-Related Use Case with
+         Dempster-Shafer Theory for LiDAR Sensor-Based Object Detection},
+  author={Patel, Milin and Jung, Rolf},
+  journal={arXiv preprint arXiv:2503.02087},
+  year={2025}
+}
 ```
 
 ## References
@@ -475,6 +572,7 @@ If you use this methodology or code, please cite:
 - Yan et al. (2018) - SECOND: Sparsely Embedded Convolutional Detection
 - Pitropov et al. (2022) - LiDAR-MIMO: Efficient Uncertainty Estimation for LiDAR 3D Object Detection
 - Patel and Jung (2024) - SOTIF-relevant evaluation of LiDAR detectors in CARLA
+- Shafer (1976) - A Mathematical Theory of Evidence (Dempster-Shafer Theory)
 - OpenPCDet (2020) - Open-source 3D object detection codebase
 
 ## License
