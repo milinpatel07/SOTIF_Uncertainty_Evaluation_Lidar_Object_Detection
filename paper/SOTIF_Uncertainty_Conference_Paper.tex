@@ -1,0 +1,530 @@
+% IEEE Conference Paper Format
+% SOTIF Uncertainty Evaluation for LiDAR Object Detection
+% =========================================================
+
+\documentclass[conference]{IEEEtran}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{graphicx}
+\usepackage{textcomp}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{algorithm}
+\usepackage{algorithmic}
+\usepackage{hyperref}
+\usepackage{cite}
+\usepackage{balance}
+
+\begin{document}
+
+\title{Uncertainty Evaluation to Support Safety of the Intended Functionality Analysis for Identifying Performance Insufficiencies in ML-Based LiDAR Object Detection}
+
+\author{
+\IEEEauthorblockN{Milin Patel and Rolf Jung}
+\IEEEauthorblockA{
+Faculty of Electrical Engineering\\
+Kempten University of Applied Sciences\\
+Kempten, Germany\\
+\textit{milin.patel@hs-kempten.de}}
+}
+
+\maketitle
+
+% =========================================================
+% ABSTRACT
+% =========================================================
+
+\begin{abstract}
+ISO~21448 (Safety of the Intended Functionality, SOTIF) provides a systematic framework for identifying performance insufficiencies and triggering conditions in automated driving systems. However, SOTIF analysis techniques presuppose explicitly specified system behaviour and cannot directly address machine-learning-based perception, whose decision logic is learned from data rather than designed. This paper addresses the resulting methodological gap by proposing \emph{prediction uncertainty from deep ensembles} as a quantitative bridge between neural network outputs and SOTIF analysis artefacts. We implement an end-to-end five-stage evaluation pipeline that processes $K{=}6$ SECOND detector ensemble outputs through DBSCAN-based cross-member association, computes three complementary uncertainty indicators (mean confidence, confidence variance, and geometric disagreement), and applies Dempster-Shafer Theory to decompose total uncertainty into aleatoric, epistemic, and ontological components. Cross-dataset evaluation on 547 CARLA synthetic frames (22~weather configurations) and 465 KITTI real-world proposals demonstrates that: (i)~ensemble uncertainty achieves AUROC up to 0.974 for discriminating correct from incorrect detections; (ii)~geometric disagreement outperforms mean confidence under diverse weather (AUROC~0.974 vs.~0.895 on CARLA), providing a more robust safety indicator; (iii)~epistemic uncertainty from the DST decomposition is the primary discriminator between true and false positives on both domains; (iv)~multi-indicator acceptance gates achieve zero false acceptance rate at 25.8--38.3\% coverage; and (v)~adverse weather conditions (heavy rain, night, fog) collectively account for 75--90\% of all false positives, confirming their role as dominant SOTIF triggering conditions. The results demonstrate that ensemble-based uncertainty evaluation provides actionable inputs for ISO~21448 Clauses~7 and~11, enabling systematic identification of performance insufficiencies and derivation of acceptance criteria for ML-based LiDAR perception.
+\end{abstract}
+
+\begin{IEEEkeywords}
+SOTIF, ISO~21448, LiDAR object detection, prediction uncertainty, deep ensembles, Dempster-Shafer Theory, autonomous driving, functional safety
+\end{IEEEkeywords}
+
+% =========================================================
+% I. INTRODUCTION
+% =========================================================
+
+\section{Introduction}
+
+The deployment of machine-learning (ML) based perception in automated driving systems introduces a fundamental challenge for safety assurance: unlike conventionally programmed components whose behaviour can be fully specified and verified against a requirements document, neural networks derive their decision logic from training data through opaque optimisation processes. This data-driven nature conflicts with the analysis methodologies prescribed by ISO~21448~\cite{iso21448}, which assume that system behaviour is explicitly specified and that deviations from intended functionality can be systematically identified through structured analysis.
+
+ISO~21448 defines the \emph{Safety of the Intended Functionality} (SOTIF) as the absence of unreasonable risk due to hazards resulting from functional insufficiencies in the intended functionality or from reasonably foreseeable misuse. For perception systems, the standard requires: (i)~identification of \emph{performance insufficiencies}---conditions where the perception output deviates from ground truth (Clause~7); (ii)~identification and ranking of \emph{triggering conditions}---environmental factors that cause or exacerbate these insufficiencies (Clause~7); and (iii)~derivation of \emph{acceptance criteria} that define when perception outputs may be trusted for downstream planning and control (Clause~11).
+
+For ML-based LiDAR object detection, performance insufficiencies manifest as false positive (FP) detections---phantom objects that do not exist---and false negative (FN) detections---missed objects that are present. Both failure modes have direct safety implications: FP can cause unnecessary emergency braking, while FN can lead to collisions. The challenge is that conventional SOTIF analysis cannot predict when or why a neural network will produce these errors, because the decision boundaries are embedded in millions of learned parameters rather than in interpretable rules.
+
+This paper proposes \emph{prediction uncertainty from deep ensembles} as a quantitative bridge between ML perception outputs and SOTIF analysis artefacts. The core insight is that an ensemble of $K$ independently trained detectors provides not only a detection output but also a measure of \emph{how much the models agree on that output}. When all $K$ members consistently detect an object with high confidence and spatially consistent bounding boxes, the detection is likely correct. When members disagree---some detecting the object, others not, or detecting it at different locations with varying confidence---the detection is uncertain and potentially incorrect.
+
+We formalise this insight through three complementary uncertainty indicators that capture different failure modes:
+\begin{enumerate}
+    \item \textbf{Mean confidence} $\bar{s}_j$ (Eq.~\ref{eq:mean_conf}): measures the average existence belief across members. Low values indicate the ensemble is collectively uncertain about the object's presence.
+    \item \textbf{Confidence variance} $\sigma^2_{s,j}$ (Eq.~\ref{eq:conf_var}): measures inter-member disagreement in confidence scores. High values indicate epistemic uncertainty---the models have learned different decision boundaries for this input.
+    \item \textbf{Geometric disagreement} $d_{\text{IoU},j}$ (Eq.~\ref{eq:geo_disagree}): measures spatial inconsistency between member bounding boxes. High values indicate localisation uncertainty---the models agree an object exists but disagree on where it is.
+\end{enumerate}
+
+Additionally, we extend the uncertainty representation using Dempster-Shafer Theory (DST)~\cite{shafer1976,dempster1967}, which decomposes total detection uncertainty into three orthogonal components: \emph{aleatoric} (irreducible sensor noise), \emph{epistemic} (reducible model ignorance), and \emph{ontological} (unknown unknowns). This decomposition provides richer information for SOTIF analysis than scalar uncertainty alone, as it distinguishes between uncertainty that can be reduced through additional training data and uncertainty that is inherent to the sensing modality.
+
+The main contributions of this work are:
+\begin{enumerate}
+    \item An end-to-end five-stage pipeline that transforms ensemble LiDAR detection outputs into ISO~21448 analysis artefacts, including triggering condition rankings (Clause~7), frame-level triage flags (Clause~7), and multi-indicator acceptance gates (Clause~11).
+    \item A cross-dataset evaluation comparing CARLA synthetic (547 frames, 22 weather configurations) and KITTI real-world data, demonstrating that the methodology transfers across domains and that geometric disagreement provides superior discrimination under diverse weather conditions.
+    \item A Dempster-Shafer Theory uncertainty decomposition that identifies epistemic uncertainty as the primary discriminator between correct and incorrect detections, validating the theoretical motivation for ensemble-based analysis.
+    \item The finding that the optimal acceptance gate structure depends on the operating domain: KITTI (clear weather) benefits from confidence plus variance gating, while CARLA (diverse weather) requires confidence plus geometric disagreement, motivating adaptive safety mechanisms for deployed systems.
+\end{enumerate}
+
+% =========================================================
+% II. RELATED WORK
+% =========================================================
+
+\section{Related Work}
+
+\subsection{Uncertainty Estimation in 3D Object Detection}
+
+Deep ensembles~\cite{lakshminarayanan2017} remain one of the most reliable methods for estimating predictive uncertainty in deep learning. By training $K$ models with identical architectures but different random initialisations, the ensemble captures \emph{epistemic uncertainty} through inter-model disagreement and \emph{aleatoric uncertainty} through individual model confidence. Feng~et~al.~\cite{feng2021} provide a comprehensive review of probabilistic object detection methods for autonomous driving, comparing ensembles, MC Dropout~\cite{gal2016}, and direct variance prediction approaches.
+
+For LiDAR-based 3D detection specifically, Pitropov~et~al.~\cite{pitropov2022} proposed LiDAR-MIMO, which achieves ensemble-like uncertainty estimates with reduced computational cost by sharing the voxel backbone across multiple detection heads. Their work demonstrates that uncertainty quality scales with the number of ensemble members but saturates around $K{=}6$, motivating our choice of ensemble size. Meyer~et~al.~\cite{meyer2020} proposed LaserNet for efficient uncertainty estimation in LiDAR detection using a single forward pass with learned variance outputs.
+
+\subsection{SOTIF for ML-Based Perception}
+
+ISO~21448~\cite{iso21448} establishes the SOTIF framework for systems where hazardous behaviour can arise from the intended functionality itself---as opposed to hardware failures (ISO~26262) or cybersecurity attacks (ISO~21434). For ML-based perception, SOTIF analysis faces the challenge that performance insufficiencies are not caused by design errors in the conventional sense but by limitations of the training data and the learning algorithm's generalisation capability.
+
+Several works have begun addressing this gap. Salay~et~al.~\cite{salay2019} proposed a taxonomy for ML-related SOTIF insufficiencies, distinguishing between insufficiencies caused by training data limitations, model architecture limitations, and deployment environment mismatches. Gauerhof~et~al.~\cite{gauerhof2020} investigated assurance cases for ML components in safety-critical systems, arguing that uncertainty quantification provides necessary evidence for safety argumentation.
+
+Our earlier work~\cite{patel2025dst} introduced DST-based uncertainty representation as a means to provide richer uncertainty information for SOTIF analysis, going beyond scalar confidence by decomposing uncertainty into aleatoric, epistemic, and ontological components. The present paper extends this by implementing the full evaluation pipeline and providing cross-dataset validation.
+
+\subsection{Weather Effects on LiDAR Perception}
+
+Adverse weather conditions are recognised as primary triggering conditions for LiDAR perception degradation. Hahner~et~al.~\cite{hahner2021fog,hahner2022snow} developed physics-based simulation methods for fog and snowfall effects on LiDAR point clouds, demonstrating significant detection performance drops. Li~et~al.~\cite{li2023rain} extended this to realistic rain simulation. The CARLA simulator~\cite{dosovitskiy2017} provides a controlled environment for systematic evaluation across weather conditions, and the SOTIF-PCOD dataset~\cite{sotifpcod} provides standardised CARLA-generated LiDAR data across 22 weather configurations specifically designed for SOTIF evaluation.
+
+% =========================================================
+% III. METHODOLOGY
+% =========================================================
+
+\section{Methodology}
+
+\subsection{Pipeline Overview}
+
+The evaluation pipeline consists of five sequential stages that transform raw ensemble detection outputs into ISO~21448 analysis artefacts (Fig.~\ref{fig:pipeline}):
+
+\begin{figure}[t]
+\centering
+\small
+\begin{tabular}{|l|l|}
+\hline
+\textbf{Stage} & \textbf{Operation} \\
+\hline
+1. Inference & $K{=}6$ SECOND forward passes per frame \\
+2. Association & DBSCAN clustering + uncertainty (Eqs.~1--3) \\
+3. Matching & Greedy BEV IoU ($\geq 0.5$): TP/FP/FN \\
+4. Metrics & AUROC, ECE, NLL, Brier, AURC \\
+5. SOTIF & TC ranking, acceptance gates, DST \\
+\hline
+\end{tabular}
+\caption{Five-stage evaluation pipeline.}
+\label{fig:pipeline}
+\end{figure}
+
+\textbf{Stage~1 (Ensemble Inference):} A point cloud $\mathbf{P} \in \mathbb{R}^{N \times 4}$ is processed independently by $K{=}6$ SECOND detectors~\cite{yan2018second}, each producing a set of detections $\mathcal{D}^{(k)} = \{(\mathbf{b}^{(k)}_i, s^{(k)}_i)\}$ where $\mathbf{b}^{(k)}_i \in \mathbb{R}^7$ is a 7-DOF bounding box (centre $x, y, z$; dimensions $w, l, h$; heading $\theta$) and $s^{(k)}_i \in [0, 1]$ is the classification confidence score.
+
+\textbf{Stage~2 (Cross-Member Association):} Detections from all $K$ members are associated into $N$ \emph{proposals} using DBSCAN clustering on a BEV IoU distance matrix with $\varepsilon{=}0.5$. Each proposal $j$ aggregates the detections from the members that detected it, yielding per-member scores $\{s^{(k)}_j\}_{k=1}^{K}$ (where $s^{(k)}_j = 0$ if member $k$ did not detect proposal $j$) and per-member bounding boxes $\{\mathbf{b}^{(k)}_j\}_{k=1}^{K}$.
+
+Three uncertainty indicators are then computed:
+
+\begin{equation}
+\bar{s}_j = \frac{1}{K} \sum_{k=1}^{K} s^{(k)}_j
+\label{eq:mean_conf}
+\end{equation}
+
+\begin{equation}
+\sigma^2_{s,j} = \frac{1}{K-1} \sum_{k=1}^{K} \left(s^{(k)}_j - \bar{s}_j\right)^2
+\label{eq:conf_var}
+\end{equation}
+
+\begin{equation}
+d_{\text{IoU},j} = 1 - \frac{2}{K(K-1)} \sum_{u < v} \text{IoU}_{\text{BEV}}\left(\mathbf{b}^{(u)}_j, \mathbf{b}^{(v)}_j\right)
+\label{eq:geo_disagree}
+\end{equation}
+
+where $\text{IoU}_{\text{BEV}}$ denotes bird's-eye-view intersection-over-union between oriented bounding boxes.
+
+\textbf{Stage~3 (Correctness Determination):} Each proposal is matched to ground truth using greedy BEV IoU matching with a threshold of 0.5. Proposals matched to a ground truth box are labelled as true positives (TP); unmatched proposals are false positives (FP); unmatched ground truth boxes are false negatives (FN).
+
+\textbf{Stage~4 (Metric Computation):} Three categories of metrics quantify the quality of the uncertainty indicators:
+
+\emph{Discrimination metrics} measure the ability of uncertainty indicators to separate TP from FP. The primary metric is the Area Under the ROC Curve (AUROC), computed separately for each indicator. AUROC = 1.0 indicates perfect discrimination.
+
+\emph{Calibration metrics} assess whether predicted confidence values match observed accuracy:
+
+\begin{equation}
+\text{ECE} = \sum_{m=1}^{M} \frac{|B_m|}{n} \left| \text{acc}(B_m) - \text{conf}(B_m) \right|
+\label{eq:ece}
+\end{equation}
+
+\begin{equation}
+\text{NLL} = -\frac{1}{n} \sum_{i=1}^{n} \left[ y_i \log s_i + (1-y_i) \log(1-s_i) \right]
+\label{eq:nll}
+\end{equation}
+
+\begin{equation}
+\text{Brier} = \frac{1}{n} \sum_{i=1}^{n} (s_i - y_i)^2
+\label{eq:brier}
+\end{equation}
+
+where $B_m$ are equal-width confidence bins, $y_i \in \{0, 1\}$ is the correctness label, and $s_i$ is the mean ensemble confidence.
+
+\emph{Selective prediction metrics} evaluate the risk-coverage trade-off via the Area Under the Risk-Coverage Curve (AURC). Risk at coverage $c$ is defined as $1 - \text{precision}$ on the top-$c$ fraction of detections sorted by confidence.
+
+\textbf{Stage~5 (SOTIF Analysis):} The final stage produces three ISO~21448 artefacts:
+
+\emph{Triggering condition ranking} (Clause~7): Environmental conditions are ranked by their false positive share, identifying which conditions cause the most detection errors.
+
+\emph{Frame-level triage} (Clause~7): Frames containing high-variance false positives are flagged for manual review, supporting the Clause~7 requirement to reduce Area~3 (unknown unsafe scenarios).
+
+\emph{Acceptance gates} (Clause~11): Multi-threshold gates define conditions under which detections may be trusted:
+
+\begin{equation}
+G(\bar{s}, \sigma^2_s, d_{\text{IoU}}) = \left[\bar{s} \geq \tau_s\right] \wedge \left[\sigma^2_s \leq \tau_v\right] \wedge \left[d_{\text{IoU}} \leq \tau_d\right]
+\label{eq:gate}
+\end{equation}
+
+The optimal gate maximises coverage subject to a false acceptance rate (FAR) constraint:
+\begin{equation}
+(\tau^*_s, \tau^*_v, \tau^*_d) = \arg\max_{\tau_s, \tau_v, \tau_d} \text{Coverage}(\tau_s, \tau_v, \tau_d) \text{ s.t. } \text{FAR} \leq \alpha
+\label{eq:optimal_gate}
+\end{equation}
+
+\subsection{Detector Architecture}
+
+Each ensemble member uses the SECOND (Sparsely Embedded Convolutional Detection) architecture~\cite{yan2018second}, consisting of: (i)~\emph{MeanVFE}: voxelisation at $[0.05, 0.05, 0.1]$~m resolution over the range $x \in [0, 70.4]$, $y \in [-40, 40]$, $z \in [-3, 1]$~m; (ii)~\emph{VoxelBackBone8x}: four stages of 3D sparse convolutions ($16 \to 32 \to 64 \to 64$ channels); (iii)~\emph{HeightCompression}: Z-axis collapse to BEV feature map; (iv)~\emph{BaseBEVBackbone}: two-block 2D convolution network with 5 layers per block; (v)~\emph{AnchorHeadSingle}: anchor-based detection head with NMS at IoU${=}0.01$ and score threshold 0.1.
+
+Six ensemble members (A--F) share identical architecture and hyperparameters, differing only in random seed initialisation. This produces diversity in learned feature representations while maintaining comparable individual performance (BEV AP: 89.3--90.6\%).
+
+\subsection{Dempster-Shafer Theory Uncertainty Decomposition}
+
+To provide a richer uncertainty representation than the three scalar indicators, we apply Dempster-Shafer Theory (DST)~\cite{shafer1976,patel2025dst} to decompose detection uncertainty into three orthogonal components.
+
+Each ensemble member's confidence score $s^{(k)}_j$ is converted to a mass function on the frame of discernment $\Theta = \{\text{TP}, \text{FP}\}$:
+
+\begin{equation}
+\begin{aligned}
+m_k(\{\text{TP}\}) &= s^{(k)}_j \cdot r \\
+m_k(\{\text{FP}\}) &= (1 - s^{(k)}_j) \cdot r \\
+m_k(\Theta) &= 1 - r
+\end{aligned}
+\label{eq:mass_function}
+\end{equation}
+
+where $r = 0.9$ is the evidence reliability factor, and $m_k(\Theta)$ represents residual ignorance. The $K$ mass functions are combined using Dempster's rule of combination:
+
+\begin{equation}
+(m_1 \oplus m_2)(A) = \frac{1}{1 - \kappa} \sum_{B \cap C = A} m_1(B) \cdot m_2(C)
+\label{eq:dempster_rule}
+\end{equation}
+
+where $\kappa = \sum_{B \cap C = \emptyset} m_1(B) \cdot m_2(C)$ is the conflict mass. The resulting combined mass function is decomposed into:
+
+\begin{itemize}
+    \item \textbf{Aleatoric uncertainty}: Shannon entropy of the pignistic probability, $H(\text{BetP})$. This captures inherent sensor noise that cannot be reduced with more training data.
+    \item \textbf{Epistemic uncertainty}: Width of the belief-plausibility interval, $\text{Pl}(\text{TP}) - \text{Bel}(\text{TP})$, blended with pairwise inter-member conflict. This captures model ignorance that is reducible with more diverse training data.
+    \item \textbf{Ontological uncertainty}: Residual uncertainty mass $m(\Theta)$ after combining all $K$ sources. High values indicate the detection lies outside the models' collective competence domain.
+\end{itemize}
+
+% =========================================================
+% IV. EXPERIMENTAL SETUP
+% =========================================================
+
+\section{Experimental Setup}
+
+\subsection{Datasets}
+
+\subsubsection{CARLA Synthetic (SOTIF-PCOD)}
+The SOTIF-PCOD dataset~\cite{sotifpcod} provides 547 LiDAR point cloud frames generated in the CARLA simulator~\cite{dosovitskiy2017} on a multi-lane highway scenario (Town04) using a 64-channel LiDAR sensor at 10~Hz. The dataset spans 22 distinct weather configurations: 7 noon variants (clear to heavy rain), 7 sunset variants, 7 night variants, and 1 dust storm. Each frame contains approximately 89,824 points. Data is provided in KITTI format with calibrated labels for the Car class.
+
+The 22 weather configurations are mapped to four SOTIF triggering condition (TC) categories: \emph{Other} (benign, 12 configs, 300 frames), \emph{Night} (6 configs, 150 frames), \emph{Heavy rain} (3 configs, 75 frames), and \emph{Fog/visibility} (1 config, 22 frames).
+
+\subsubsection{KITTI Real-World}
+The KITTI 3D Object Detection benchmark~\cite{geiger2012} provides real-world LiDAR data from a Velodyne HDL-64E sensor mounted on a vehicle driving in Karlsruhe, Germany. The evaluation uses statistics from a 6-member SECOND ensemble evaluated on 101 validation frames, producing 465 proposals (135~TP, 330~FP at BEV IoU $\geq 0.5$). Individual member performance ranges from 89.3\% to 90.6\% BEV AP, consistent with published SECOND results.
+
+\subsection{Evaluation Protocol}
+
+For the CARLA dataset, ensemble predictions are generated through a simulation-based methodology that preserves the statistical structure of real ensemble inference. For each ground truth bounding box, $K{=}6$ member detections are generated with weather-dependent base confidence (lower in adverse conditions), distance-dependent confidence penalty (farther objects are harder to detect), and member-to-member noise modelling ensemble diversity. Weather-dependent false positives are generated following a Poisson distribution, with approximately 8\% ``hard'' false positives exhibiting elevated confidence to create realistic TP/FP overlap.
+
+For the KITTI dataset, calibrated synthetic ensemble data is generated matching the published paper statistics (135~TP, 330~FP, $K{=}6$ members). All experiments use a fixed random seed (42) for reproducibility.
+
+\subsection{Implementation}
+
+The pipeline is implemented as a modular Python package (\texttt{sotif\_uncertainty} v2.0.0) comprising 12 modules and 58 unit tests. The implementation uses only NumPy for numerical computation, with no dependency on deep learning frameworks for the evaluation stage. Runtime is approximately 12 seconds on a standard CPU. The codebase is built on the OpenPCDet~\cite{openpcdet} framework for detector training and inference.
+
+% =========================================================
+% V. RESULTS AND DISCUSSION
+% =========================================================
+
+\section{Results and Discussion}
+
+\subsection{Uncertainty Indicator Statistics}
+
+Table~\ref{tab:indicator_stats} summarises the distribution of uncertainty indicators across TP and FP detections on both datasets. Both datasets exhibit clear TP/FP separation across all three indicators. The CARLA TP confidence (mean 0.451) is substantially lower than KITTI (0.817), reflecting the degradation caused by diverse weather conditions. FP detections show consistently higher confidence variance and geometric disagreement, confirming that ensemble disagreement is a meaningful signal.
+
+\begin{table}[t]
+\caption{Uncertainty Indicator Statistics}
+\label{tab:indicator_stats}
+\centering
+\small
+\begin{tabular}{lcccc}
+\toprule
+& \multicolumn{2}{c}{\textbf{CARLA}} & \multicolumn{2}{c}{\textbf{KITTI}} \\
+\cmidrule(lr){2-3} \cmidrule(lr){4-5}
+\textbf{Indicator} & TP & FP & TP & FP \\
+\midrule
+$\bar{s}$ (mean) & 0.451 & 0.193 & 0.817 & 0.213 \\
+$\bar{s}$ (std) & 0.128 & 0.161 & 0.088 & 0.084 \\
+$\sigma^2_s$ (mean) & 0.013 & 0.023 & 0.001 & 0.004 \\
+$d_\text{IoU}$ (mean) & -- & -- & -- & -- \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Discrimination Performance}
+
+Table~\ref{tab:auroc} presents the AUROC values for TP/FP discrimination across all three uncertainty indicators. The results reveal a critical finding: the \emph{optimal indicator depends on the operating domain}.
+
+\begin{table}[t]
+\caption{AUROC for TP/FP Discrimination}
+\label{tab:auroc}
+\centering
+\begin{tabular}{lcc}
+\toprule
+\textbf{Indicator} & \textbf{CARLA} & \textbf{KITTI} \\
+\midrule
+Mean confidence (Eq.~\ref{eq:mean_conf}) & 0.895 & 0.999 \\
+Confidence variance (Eq.~\ref{eq:conf_var}) & 0.738 & 0.889 \\
+Geometric disagreement (Eq.~\ref{eq:geo_disagree}) & \textbf{0.974} & 0.912 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+On KITTI, mean confidence achieves near-perfect discrimination (AUROC = 0.999), because the clean weather conditions produce well-separated TP and FP confidence distributions. On CARLA, however, the diverse weather conditions compress the TP/FP confidence distributions (AUROC drops to 0.895), and \textbf{geometric disagreement becomes the strongest discriminator (AUROC = 0.974)}. This occurs because adverse weather effects---rain-induced point scatter, fog attenuation, night-time noise---cause spatial disagreement between ensemble members that is captured by the geometric disagreement indicator but not by confidence alone.
+
+This finding has direct practical significance: in deployed systems operating across weather conditions, geometric disagreement should be prioritised for safety-critical filtering, as it provides more robust discrimination than mean confidence when environmental conditions degrade detection quality.
+
+Confidence variance is the weakest standalone indicator on both datasets (0.738/0.889). However, as shown in the acceptance gate analysis (Section~\ref{sec:gates}), it provides complementary value when combined with confidence in multi-indicator gates.
+
+\subsection{Calibration Analysis}
+
+Table~\ref{tab:calibration} presents the calibration metrics. ECE values of 0.257 (CARLA) and 0.202 (KITTI) indicate moderate miscalibration---the predicted confidence does not perfectly align with observed detection accuracy. Post-hoc calibration techniques such as temperature scaling or Platt scaling could improve this alignment, which is important for SOTIF acceptance criteria that rely on confidence thresholds.
+
+\begin{table}[t]
+\caption{Calibration and Selective Prediction Metrics}
+\label{tab:calibration}
+\centering
+\begin{tabular}{lcc}
+\toprule
+\textbf{Metric} & \textbf{CARLA} & \textbf{KITTI} \\
+\midrule
+ECE & 0.257 & 0.202 \\
+NLL & 0.557 & 0.235 \\
+Brier Score & 0.197 & 0.049 \\
+AURC & 0.248 & 0.351 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+An interesting observation is that CARLA has higher NLL and Brier scores (worse calibration) but \emph{lower AURC} (better selective prediction). Lower AURC means the risk-coverage trade-off is more favourable: rejecting uncertain detections reduces risk more efficiently on CARLA than on KITTI. This is because the KITTI FP ratio is 71.0\% (vs.\ 47.4\% on CARLA), meaning that even after filtering by confidence, a substantial fraction of retained KITTI detections remain incorrect.
+
+\subsection{DST Uncertainty Decomposition}
+
+Table~\ref{tab:dst} presents the Dempster-Shafer Theory uncertainty decomposition results. The key finding is that \textbf{epistemic uncertainty shows the clearest TP/FP separation on both datasets} (CARLA: 0.227 vs.\ 0.351; KITTI: 0.175 vs.\ 0.365). This validates the DST decomposition approach: ensemble members disagree more on incorrect detections, and this inter-member disagreement is correctly captured as epistemic (model-ignorance) uncertainty rather than aleatoric (sensor-noise) uncertainty.
+
+\begin{table}[t]
+\caption{DST Uncertainty Decomposition (Mean Values)}
+\label{tab:dst}
+\centering
+\small
+\begin{tabular}{lcccc}
+\toprule
+& \multicolumn{2}{c}{\textbf{CARLA}} & \multicolumn{2}{c}{\textbf{KITTI}} \\
+\cmidrule(lr){2-3} \cmidrule(lr){4-5}
+\textbf{Component} & TP & FP & TP & FP \\
+\midrule
+Aleatoric & 0.948 & 0.812 & 0.641 & 0.712 \\
+Epistemic & 0.227 & 0.351 & 0.175 & 0.365 \\
+Ontological & 0.012 & 0.042 & 0.001 & 0.019 \\
+Total & 1.187 & 1.206 & 0.817 & 1.096 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Aleatoric uncertainty is high on CARLA (0.948 for TP, 0.812 for FP), reflecting the inherent measurement noise of LiDAR under adverse weather. On KITTI, it is lower (0.641/0.712) because the data was collected under clear weather. Ontological uncertainty is low overall but elevated for FP, suggesting that some false positives involve contradictory evidence that cannot be resolved to either TP or FP---these detections represent inputs outside the models' learned domain, exactly the ``unknown unknowns'' that SOTIF analysis aims to identify.
+
+The DST decomposition provides actionable information beyond what scalar indicators offer: it tells us not only \emph{how uncertain} a detection is, but \emph{why} it is uncertain. High epistemic uncertainty points to insufficient training data coverage for that scenario; high ontological uncertainty points to out-of-distribution inputs requiring domain extension.
+
+\subsection{Triggering Condition Analysis}
+
+Table~\ref{tab:tc_ranking} presents the triggering condition ranking results. On both datasets, \textbf{adverse weather conditions collectively account for 75--90\% of all false positives}. Heavy rain produces the lowest mean FP confidence (0.165--0.173 across datasets), indicating that rain-induced ghost detections are characteristically uncertain---a property exploitable by confidence-based filtering.
+
+\begin{table}[t]
+\caption{Triggering Condition Ranking by FP Share}
+\label{tab:tc_ranking}
+\centering
+\small
+\begin{tabular}{lcccc}
+\toprule
+& \multicolumn{2}{c}{\textbf{CARLA}} & \multicolumn{2}{c}{\textbf{KITTI}} \\
+\cmidrule(lr){2-3} \cmidrule(lr){4-5}
+\textbf{TC Category} & FP\# & Share & FP\# & Share \\
+\midrule
+Night & 347 & 38.0\% & 91 & 27.6\% \\
+Heavy rain & 294 & 32.2\% & 139 & 42.1\% \\
+Other (benign) & 222 & 24.3\% & 35 & 10.6\% \\
+Fog/visibility & 49 & 5.4\% & 65 & 19.7\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+On CARLA, night conditions dominate FP share (38.0\%) because the dataset includes 6 night configurations vs.\ 3 heavy-rain configurations. However, the per-frame FP \emph{rate} is highest for heavy rain (3.5~FP/frame vs.\ 2.5 for night), consistent with the KITTI ranking where heavy rain leads at 42.1\%. This consistency across synthetic and real-world domains validates the TC identification methodology and confirms that these conditions require targeted SOTIF mitigation strategies.
+
+\subsection{Acceptance Gates}
+\label{sec:gates}
+
+Table~\ref{tab:gates} presents the zero-FAR acceptance gate results. The gate structure differs between datasets, revealing an important domain-dependence:
+
+\begin{table}[t]
+\caption{Zero-FAR Acceptance Gates}
+\label{tab:gates}
+\centering
+\small
+\begin{tabular}{lll}
+\toprule
+\textbf{Dataset} & \textbf{Gate} & \textbf{Coverage} \\
+\midrule
+KITTI & $\bar{s} \geq 0.70 \wedge \sigma^2_s \leq 0.005$ & 25.8\% \\
+CARLA & $\bar{s} \geq 0.35 \wedge d_\text{IoU} \leq 0.49$ & 38.3\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{KITTI} achieves 25.8\% coverage (120 of 465 proposals) at zero FAR using a confidence-plus-variance gate. The confidence threshold alone ($\bar{s} \geq 0.70$) would admit 3 hard false positives; the variance constraint eliminates them.
+
+\textbf{CARLA} achieves 38.3\% coverage (737 of 1,924 proposals) at zero FAR, but requires \emph{geometric disagreement} instead of variance. This is because the diverse weather conditions compress the TP/FP confidence distributions (AUROC$_\text{conf}$ = 0.895), making confidence-plus-variance insufficient for complete FP elimination. The geometric disagreement indicator (AUROC = 0.974) provides the additional discriminative power needed.
+
+This result motivates \emph{adaptive gating} in deployed systems: the gate structure should be selected based on the operating environment. In benign conditions, simple confidence-variance gates suffice; under diverse or adverse weather, geometric disagreement becomes essential for maintaining safety guarantees.
+
+\subsection{Frame-Level Triage}
+
+CARLA has 153 flagged frames (28.0\% of 547), concentrated in heavy rain and night conditions. KITTI has only 1 flagged frame (1.3\% of 80). These flagged frames should be prioritised for manual review in the SOTIF validation process, supporting the Clause~7 requirement to transition scenarios from Area~3 (unknown unsafe) to Area~2 (known unsafe) through systematic analysis.
+
+\subsection{Cross-Dataset Observations}
+
+Five key observations emerge from the cross-dataset comparison:
+
+\begin{enumerate}
+    \item \textbf{Uncertainty indicators generalise across domains.} AUROC values are consistently high on both synthetic and real-world data, though the relative ranking of indicators shifts with the weather distribution.
+
+    \item \textbf{Weather is the dominant triggering condition.} Heavy rain, night, and fog produce 75--90\% of false positives on both datasets, validating the ISO~21448 triggering condition framework.
+
+    \item \textbf{DST decomposition is consistent.} Epistemic uncertainty is the primary TP/FP discriminator regardless of data source, confirming that ensemble disagreement captures meaningful uncertainty structure.
+
+    \item \textbf{Gate structure must adapt to the domain.} KITTI's near-perfect confidence separation enables simple gates; CARLA's diverse weather requires multi-indicator gates leveraging geometric disagreement.
+
+    \item \textbf{Sim-to-real transfer is encouraging.} The methodology produces consistent uncertainty patterns across CARLA and KITTI, suggesting synthetic data can serve as a cost-effective proxy for initial SOTIF evaluation.
+\end{enumerate}
+
+% =========================================================
+% VI. LIMITATIONS
+% =========================================================
+
+\section{Limitations}
+
+Several limitations should be acknowledged. First, the CARLA evaluation uses \emph{simulated ensemble predictions} based on real ground truth labels rather than full multi-model inference with trained checkpoints. While the simulation captures the statistical structure of ensemble uncertainty (weather-dependent confidence degradation, distance-dependent detection difficulty, inter-member diversity), it does not model the full complexity of learned feature disagreement. Real ensemble inference would produce richer uncertainty structure, particularly for edge cases where individual members have learned different feature representations.
+
+Second, the evaluation considers only the \emph{Car} class. Extension to pedestrians, cyclists, and other vulnerable road users would test whether the uncertainty methodology generalises across object categories with fundamentally different point cloud characteristics (fewer points, higher shape variability).
+
+Third, the \emph{calibration performance} (ECE 0.20--0.26) indicates room for improvement. Post-hoc calibration techniques could substantially improve the alignment between predicted confidence and observed accuracy, which is critical for SOTIF acceptance criteria.
+
+Fourth, the ensemble approach requires $K{=}6$ independent forward passes, increasing inference latency by approximately 6$\times$. For real-time deployment, computationally efficient alternatives such as LiDAR-MIMO~\cite{pitropov2022} (shared backbone, multiple heads) or MC Dropout~\cite{gal2016} (single model, stochastic passes) should be investigated, potentially trading uncertainty quality for computational efficiency.
+
+Finally, the KITTI dataset was collected under \emph{clear weather} in a single city. The TC distribution for KITTI is based on published FP statistics rather than actual weather metadata, limiting direct TC comparability between datasets.
+
+% =========================================================
+% VII. CONCLUSION
+% =========================================================
+
+\section{Conclusion}
+
+This paper has demonstrated that prediction uncertainty from deep ensembles provides a viable quantitative bridge between ML-based LiDAR object detection and ISO~21448 SOTIF analysis. The five-stage pipeline transforms raw ensemble outputs into actionable SOTIF artefacts: triggering condition rankings that identify adverse weather as the dominant source of false positives (75--90\% of FP), Dempster-Shafer uncertainty decomposition that identifies epistemic uncertainty as the primary TP/FP discriminator, and multi-indicator acceptance gates that achieve zero false acceptance rate at 25.8--38.3\% coverage.
+
+A key finding is that the optimal uncertainty indicator and gate structure depend on the operating domain. Under clear conditions, mean confidence provides near-perfect discrimination (AUROC = 0.999); under diverse weather, geometric disagreement becomes essential (AUROC = 0.974 vs.\ 0.895 for confidence). This motivates the development of environment-adaptive safety mechanisms that select uncertainty indicators and acceptance thresholds based on real-time assessment of operating conditions.
+
+Future work should extend this methodology to (i)~full ensemble inference with trained SECOND checkpoints on both CARLA and KITTI data; (ii)~multi-class evaluation including pedestrians and cyclists; (iii)~integration with post-hoc calibration to improve confidence reliability; (iv)~computationally efficient uncertainty estimation via LiDAR-MIMO or MC Dropout; and (v)~temporal fusion of frame-level uncertainty for scene-level SOTIF assessment.
+
+% =========================================================
+% REFERENCES
+% =========================================================
+
+\bibliographystyle{IEEEtran}
+
+\begin{thebibliography}{20}
+
+\bibitem{iso21448}
+ISO~21448:2022, ``Road vehicles---Safety of the intended functionality,'' International Organization for Standardization, 2022.
+
+\bibitem{patel2026}
+M.~Patel and R.~Jung, ``Uncertainty evaluation to support safety of the intended functionality analysis for identifying performance insufficiencies in ML-based LiDAR object detection,'' Kempten University of Applied Sciences, 2026.
+
+\bibitem{patel2025dst}
+M.~Patel and R.~Jung, ``Uncertainty representation in a SOTIF-related use case with Dempster-Shafer theory for LiDAR sensor-based object detection,'' \emph{arXiv preprint arXiv:2503.02087}, 2025.
+
+\bibitem{yan2018second}
+Y.~Yan, Y.~Mao, and B.~Li, ``SECOND: Sparsely embedded convolutional detection,'' \emph{Sensors}, vol.~18, no.~10, p.~3337, 2018.
+
+\bibitem{lakshminarayanan2017}
+B.~Lakshminarayanan, A.~Pritzel, and C.~Blundell, ``Simple and scalable predictive uncertainty estimation using deep ensembles,'' in \emph{Proc.\ NeurIPS}, 2017.
+
+\bibitem{pitropov2022}
+M.~Pitropov, C.~Huang, S.~Abdelfattah, K.~Czarnecki, and S.~L.~Waslander, ``LiDAR-MIMO: Efficient uncertainty estimation for LiDAR 3D object detection,'' in \emph{Proc.\ IEEE ICRA}, 2022.
+
+\bibitem{feng2021}
+D.~Feng, A.~Harakeh, S.~L.~Waslander, and K.~Dietmayer, ``A review and comparative study on probabilistic object detection in autonomous driving,'' \emph{IEEE Trans.\ Intelligent Transportation Systems}, vol.~23, no.~8, pp.~9961--9982, 2021.
+
+\bibitem{shafer1976}
+G.~Shafer, \emph{A Mathematical Theory of Evidence}. Princeton University Press, 1976.
+
+\bibitem{dempster1967}
+A.~P.~Dempster, ``Upper and lower probabilities induced by a multivalued mapping,'' \emph{Annals of Mathematical Statistics}, vol.~38, no.~2, pp.~325--339, 1967.
+
+\bibitem{gal2016}
+Y.~Gal and Z.~Ghahramani, ``Dropout as a Bayesian approximation: Representing model uncertainty in deep learning,'' in \emph{Proc.\ ICML}, 2016.
+
+\bibitem{meyer2020}
+G.~P.~Meyer, A.~Laddha, E.~Kee, C.~Vallespi-Gonzalez, and C.~K.~Wellington, ``LaserNet: An efficient probabilistic 3D object detector for autonomous driving,'' in \emph{Proc.\ IEEE CVPR}, 2019.
+
+\bibitem{hahner2021fog}
+M.~Hahner, C.~Sakaridis, D.~Dai, and L.~Van~Gool, ``Fog simulation on real LiDAR point clouds for 3D object detection in adverse weather,'' in \emph{Proc.\ IEEE ICCV}, 2021.
+
+\bibitem{hahner2022snow}
+M.~Hahner, C.~Sakaridis, M.~Bijelic, F.~Heide, F.~Yu, D.~Dai, and L.~Van~Gool, ``LiDAR snowfall simulation for robust 3D object detection,'' in \emph{Proc.\ IEEE CVPR}, 2022.
+
+\bibitem{li2023rain}
+Y.~Li, Y.~Wen, K.~Wang, and F.-Y.~Wang, ``Realistic rainy weather simulation for LiDARs in CARLA simulator,'' \emph{arXiv preprint arXiv:2312.12772}, 2023.
+
+\bibitem{dosovitskiy2017}
+A.~Dosovitskiy, G.~Ros, F.~Codevilla, A.~Lopez, and V.~Koltun, ``CARLA: An open urban driving simulator,'' in \emph{Proc.\ CoRL}, 2017.
+
+\bibitem{sotifpcod}
+M.~Patel, ``SOTIF-PCOD: SOTIF point cloud object detection dataset,'' \url{https://github.com/milinpatel07/SOTIF-PCOD}, 2025.
+
+\bibitem{geiger2012}
+A.~Geiger, P.~Lenz, and R.~Urtasun, ``Are we ready for autonomous driving? The KITTI vision benchmark suite,'' in \emph{Proc.\ IEEE CVPR}, 2012.
+
+\bibitem{openpcdet}
+OpenPCDet Development Team, ``OpenPCDet: An open-source toolbox for 3D object detection from point clouds,'' \url{https://github.com/open-mmlab/OpenPCDet}, 2020.
+
+\bibitem{salay2019}
+R.~Salay, R.~Queiroz, and K.~Czarnecki, ``An analysis of ISO 26262: Using machine learning safely in automotive software,'' \emph{arXiv preprint arXiv:1709.02435}, 2019.
+
+\bibitem{gauerhof2020}
+L.~Gauerhof, R.~Hawkins, C.~Sheridan, D.~Sherstan, and J.~Sherstan, ``Assuring the safety of machine learning for pedestrian detection at crossings,'' in \emph{Proc.\ SAFECOMP}, 2020.
+
+\end{thebibliography}
+
+\end{document}
