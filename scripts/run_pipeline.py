@@ -67,7 +67,7 @@ def parse_args():
                         help="Root directory for dataset.")
     parser.add_argument("--input", type=str, default=None,
                         help="Path to pre-computed ensemble results pickle.")
-    parser.add_argument("--output_dir", type=str, default="Analysis",
+    parser.add_argument("--output_dir", type=str, default="results",
                         help="Directory for output figures and results.")
 
     # Data generation

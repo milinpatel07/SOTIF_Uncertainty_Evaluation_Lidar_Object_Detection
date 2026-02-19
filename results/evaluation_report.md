@@ -525,7 +525,7 @@ git clone https://github.com/milinpatel07/SOTIF-PCOD.git
 # Run cross-dataset evaluation
 python scripts/execute_evaluation.py \
     --carla_root SOTIF-PCOD/SOTIF_Scenario_Dataset \
-    --output_dir reports/evaluation_report \
+    --output_dir results \
     --seed 42
 ```
 

@@ -72,7 +72,7 @@ def parse_args():
     parser.add_argument(
         "--output_dir",
         type=str,
-        default="Analysis",
+        default="results",
         help="Output directory for figures and results.",
     )
     parser.add_argument(
