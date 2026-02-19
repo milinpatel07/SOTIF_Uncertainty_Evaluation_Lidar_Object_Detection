@@ -83,3 +83,8 @@ from sotif_uncertainty.dataset_adapter import (
     DatasetAdapter,
     load_dataset,
 )
+from sotif_uncertainty.carla_case_study import (
+    generate_carla_case_study,
+    validate_carla_case_study,
+    print_validation_report,
+)

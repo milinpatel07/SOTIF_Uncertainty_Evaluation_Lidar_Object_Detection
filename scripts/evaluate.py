@@ -87,6 +87,14 @@ def parse_args():
         default=42,
         help="Random seed for synthetic data generation.",
     )
+    parser.add_argument(
+        "--mode",
+        type=str,
+        choices=["demo", "carla_study", "real"],
+        default=None,
+        help="Evaluation mode: demo (abstract stats), carla_study (Section 5), "
+             "real (--input required). If not specified, uses demo when no --input.",
+    )
     return parser.parse_args()
 
 
@@ -255,10 +263,16 @@ def main():
             conditions = load_conditions_metadata(args.conditions_file, frame_ids)
             print(f"  Loaded conditions from: {args.conditions_file}")
 
-    else:
-        print("Using synthetic demo data (matching paper statistics).")
-        from sotif_uncertainty.demo_data import generate_demo_dataset
-        data = generate_demo_dataset(seed=args.seed)
+    elif args.mode == "carla_study" or (args.mode is None and args.input is None):
+        # Determine which synthetic data generator to use
+        if args.mode == "carla_study":
+            print("Using CARLA case study data (Section 5 of paper).")
+            from sotif_uncertainty.carla_case_study import generate_carla_case_study
+            data = generate_carla_case_study(seed=args.seed)
+        else:
+            print("Using synthetic demo data (matching paper abstract statistics).")
+            from sotif_uncertainty.demo_data import generate_demo_dataset
+            data = generate_demo_dataset(seed=args.seed)
         scores = data["scores"]
         boxes = data["boxes"]
         labels = data["labels"]
@@ -320,23 +334,50 @@ def main():
     print("=" * 60)
 
     from sotif_uncertainty.sotif_analysis import (
+        acceptance_gate,
+        compute_coverage_far,
         compute_operating_points,
         rank_triggering_conditions,
         flag_frames,
         compute_frame_summary,
     )
 
-    # Operating points (Table 6)
+    # Operating points (comprehensive set for paper tables)
+    # Confidence-only gates
     conf_only_points = compute_operating_points(
         mean_conf, conf_var, geo_disagree, labels,
-        tau_s_range=np.array([0.50, 0.60, 0.65, 0.70, 0.80, 0.85, 0.90]),
+        tau_s_range=np.array([0.35, 0.50, 0.60, 0.65, 0.70, 0.80]),
     )
-    multi_points = compute_operating_points(
+    # Confidence + variance gates
+    conf_var_points = compute_operating_points(
         mean_conf, conf_var, geo_disagree, labels,
-        tau_s_range=np.array([0.60, 0.65]),
-        tau_v_range=np.array([0.002]),
+        tau_s_range=np.array([0.50, 0.60, 0.65]),
+        tau_v_range=np.array([0.002, 0.005, 0.010]),
     )
-    all_points = conf_only_points + multi_points
+    # Confidence + geometric disagreement gates
+    conf_geo_points = []
+    for ts in [0.35, 0.50]:
+        for td in [0.30, 0.49, 0.60]:
+            accepted = acceptance_gate(mean_conf, conf_var, geo_disagree,
+                                       tau_s=ts, tau_d=td)
+            cov, far, ret, fp_count = compute_coverage_far(accepted, labels)
+            conf_geo_points.append({
+                "gate": f"s>={ts:.2f} & d<={td:.2f}",
+                "tau_s": ts, "tau_d": td, "tau_v": float("inf"),
+                "coverage": cov, "retained": ret, "fp": fp_count, "far": far,
+            })
+    # Geometric disagreement-only gates
+    geo_only_points = []
+    for td in [0.20, 0.30, 0.40, 0.50]:
+        accepted = acceptance_gate(mean_conf, conf_var, geo_disagree,
+                                   tau_s=0.0, tau_d=td)
+        cov, far, ret, fp_count = compute_coverage_far(accepted, labels)
+        geo_only_points.append({
+            "gate": f"d<={td:.2f}",
+            "tau_s": 0.0, "tau_d": td, "tau_v": float("inf"),
+            "coverage": cov, "retained": ret, "fp": fp_count, "far": far,
+        })
+    all_points = conf_only_points + conf_geo_points + geo_only_points + conf_var_points
 
     print("\n  Operating Points (Table 6):")
     print(f"  {'Gate':<35} {'Cov.':>6} {'Ret.':>5} {'FP':>4} {'FAR':>8}")
@@ -407,19 +448,67 @@ def main():
         print(f"    - {name}")
 
     # ==========================================================
-    # Save numerical results
+    # Save comprehensive numerical results
     # ==========================================================
     results_summary = {
-        "n_proposals": len(labels),
-        "n_tp": int(np.sum(tp_mask)),
-        "n_fp": int(np.sum(fp_mask)),
-        "auroc_mean_confidence": float(disc["auroc_mean_confidence"]),
-        "auroc_confidence_variance": float(disc["auroc_confidence_variance"]),
-        "auroc_geometric_disagreement": float(disc["auroc_geometric_disagreement"]),
-        "ece": float(cal["ece"]),
-        "nll": float(cal["nll"]),
-        "brier": float(cal["brier"]),
-        "aurc": float(rc["aurc"]),
+        "dataset": {
+            "n_proposals": len(labels),
+            "n_tp": int(np.sum(tp_mask)),
+            "n_fp": int(np.sum(fp_mask)),
+            "fp_ratio": float(np.sum(fp_mask) / len(labels)),
+            "n_frames": int(len(np.unique(frame_ids))),
+            "K": int(scores.shape[1]) if scores.ndim == 2 else 6,
+        },
+        "indicator_statistics": {
+            "tp": {
+                "mean_confidence": {"mean": float(np.mean(mean_conf[tp_mask])),
+                                    "std": float(np.std(mean_conf[tp_mask]))},
+                "confidence_variance": {"mean": float(np.mean(conf_var[tp_mask])),
+                                        "std": float(np.std(conf_var[tp_mask]))},
+                "geometric_disagreement": {"mean": float(np.mean(geo_disagree[tp_mask])),
+                                           "std": float(np.std(geo_disagree[tp_mask]))},
+            },
+            "fp": {
+                "mean_confidence": {"mean": float(np.mean(mean_conf[fp_mask])),
+                                    "std": float(np.std(mean_conf[fp_mask]))},
+                "confidence_variance": {"mean": float(np.mean(conf_var[fp_mask])),
+                                        "std": float(np.std(conf_var[fp_mask]))},
+                "geometric_disagreement": {"mean": float(np.mean(geo_disagree[fp_mask])),
+                                           "std": float(np.std(geo_disagree[fp_mask]))},
+            },
+        },
+        "discrimination": {
+            "auroc_mean_confidence": float(disc["auroc_mean_confidence"]),
+            "auroc_confidence_variance": float(disc["auroc_confidence_variance"]),
+            "auroc_geometric_disagreement": float(disc["auroc_geometric_disagreement"]),
+        },
+        "calibration": {
+            "ece": float(cal["ece"]),
+            "nll": float(cal["nll"]),
+            "brier": float(cal["brier"]),
+            "aurc": float(rc["aurc"]),
+        },
+        "operating_points": [
+            {"gate": p["gate"], "coverage": float(p["coverage"]),
+             "retained": int(p["retained"]), "fp": int(p["fp"]),
+             "far": float(p["far"])}
+            for p in all_points
+        ],
+        "triggering_conditions": [
+            {"condition": tc["condition"],
+             "fp_count": int(tc["fp_count"]),
+             "fp_share": float(tc["fp_share"]),
+             "mean_conf_fp": float(tc["mean_conf_fp"]) if not np.isnan(tc["mean_conf_fp"]) else None,
+             "mean_var_fp": float(tc["mean_var_fp"]) if not np.isnan(tc["mean_var_fp"]) else None}
+            for tc in tc_results
+        ],
+        "frame_triage": {
+            "flagged_count": int(flag_results["flagged_count"]),
+            "total_frames": int(flag_results["total_frames"]),
+            "flagged_fraction": float(flag_results["flagged_count"] / flag_results["total_frames"])
+                if flag_results["total_frames"] > 0 else 0.0,
+            "variance_threshold": float(flag_results["threshold"]),
+        },
     }
     results_path = os.path.join(args.output_dir, "results_summary.json")
     with open(results_path, "w") as f:
