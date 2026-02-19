@@ -756,7 +756,7 @@ def generate_all_figures(
     frame_summaries: List[Dict],
     tc_results: List[Dict],
     operating_points: List[Dict],
-    output_dir: str = "Analysis",
+    output_dir: str = "results",
     scores: Optional[np.ndarray] = None,
     geo_disagree: Optional[np.ndarray] = None,
     conditions: Optional[np.ndarray] = None,

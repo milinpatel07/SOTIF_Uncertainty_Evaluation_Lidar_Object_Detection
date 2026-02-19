@@ -39,23 +39,23 @@ The methodology is evaluated on two datasets: real-world KITTI and synthetic CAR
 
 | Indicator | KITTI (Real-World) | CARLA (Synthetic) |
 |---|---|---|
-| Mean confidence | 0.999 | 0.903 |
-| Confidence variance | 0.889 | 0.722 |
-| Geometric disagreement | 0.912 | 0.982 |
+| Mean confidence | 0.999 | 0.895 |
+| Confidence variance | 0.889 | 0.738 |
+| Geometric disagreement | 0.912 | 0.974 |
 
 ### Calibration
 
 | Metric | KITTI | CARLA |
 |---|---|---|
-| ECE | 0.202 | 0.231 |
-| NLL | 0.235 | 0.554 |
-| Brier Score | 0.049 | 0.193 |
+| ECE | 0.202 | 0.257 |
+| NLL | 0.235 | 0.557 |
+| Brier Score | 0.049 | 0.197 |
 
 ### Operating Points
 
-At confidence threshold s >= 0.70 on KITTI: **25.8% coverage with zero false positives**.
+At confidence-plus-variance gate (s >= 0.70, var <= 0.005) on KITTI: **25.8% coverage at zero FAR** (120 of 465 proposals retained).
 
-Combined gate s >= 0.35 & d <= 0.30 on CARLA: **40.2% coverage with FAR = 2.8%** (22 FP out of 773 retained).
+At confidence-plus-geometric gate (s >= 0.35, d_IoU <= 0.49) on CARLA: **38.3% coverage at zero FAR** (737 of 1,924 proposals retained).
 
 Full results, figures, and cross-dataset analysis are in [`results/`](results/).
 
