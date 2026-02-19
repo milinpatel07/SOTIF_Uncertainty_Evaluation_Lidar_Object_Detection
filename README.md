@@ -105,6 +105,9 @@ Full results, figures, and cross-dataset analysis are in [`results/`](results/).
 │       ├── kitti_real_world/              # 13 KITTI figures
 │       └── comparison/                    # 5 cross-dataset comparison figures
 │
+├── docs/
+│   └── extending.md                       # Guide: adding detectors, datasets, indicators
+│
 ├── notebooks/
 │   └── SOTIF_Uncertainty_Evaluation_Demo.ipynb   # Interactive Colab demo
 │
@@ -114,6 +117,7 @@ Full results, figures, and cross-dataset analysis are in [`results/`](results/).
 ├── tests/
 │   └── test_pipeline.py                   # 58 tests across all pipeline stages
 │
+├── CITATION.cff
 ├── requirements.txt
 ├── pyproject.toml
 ├── setup.py
