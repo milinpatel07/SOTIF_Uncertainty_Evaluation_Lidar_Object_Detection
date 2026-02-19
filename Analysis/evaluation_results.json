@@ -1,0 +1,49 @@
+{
+  "pipeline": "SOTIF Uncertainty Evaluation",
+  "dataset": {
+    "n_proposals": 1924,
+    "n_tp": 1012,
+    "n_fp": 912
+  },
+  "discrimination": {
+    "auroc_mean_confidence": 0.9028034203591982,
+    "auroc_confidence_variance": 0.7215063969211576,
+    "auroc_geometric_disagreement": 0.982497312946398
+  },
+  "calibration": {
+    "ece": 0.23149188795041395,
+    "nll": 0.5544551628801134,
+    "brier": 0.19297659057233632,
+    "aurc": 0.19583442489085817
+  },
+  "triggering_conditions": [
+    {
+      "condition": "night",
+      "fp_share": 0.38048245614035087,
+      "mean_conf_fp": 0.21174105130205753,
+      "mean_var_fp": 0.023956809654001487
+    },
+    {
+      "condition": "heavy_rain",
+      "fp_share": 0.3223684210526316,
+      "mean_conf_fp": 0.16457720667814751,
+      "mean_var_fp": 0.02296861192112161
+    },
+    {
+      "condition": "nominal",
+      "fp_share": 0.24342105263157895,
+      "mean_conf_fp": 0.22247451287562064,
+      "mean_var_fp": 0.030031496695096454
+    },
+    {
+      "condition": "fog_visibility",
+      "fp_share": 0.0537280701754386,
+      "mean_conf_fp": 0.17651622294472571,
+      "mean_var_fp": 0.032077515438352674
+    }
+  ],
+  "flags": {
+    "total_frames": 547,
+    "flagged_count": 149
+  }
+}

@@ -56,9 +56,10 @@ def parse_args():
     parser.add_argument(
         "--mode",
         type=str,
-        choices=["demo", "kitti", "carla", "results"],
+        choices=["demo", "kitti", "carla", "carla_study", "results"],
         default="demo",
-        help="Pipeline mode: demo (synthetic), kitti, carla, or results (pre-computed).",
+        help="Pipeline mode: demo (abstract stats), carla_study (Section 5 case study), "
+             "kitti, carla (dataset), or results (pre-computed).",
     )
 
     # Data paths
@@ -129,6 +130,34 @@ def run_demo_pipeline(args):
     print(f"      AUROC(mean_conf) = {stats['auroc_mean_confidence']:.3f} (target: 0.999)")
     print(f"      AUROC(conf_var)  = {stats['auroc_confidence_variance']:.3f} (target: 0.984)")
     print(f"      AUROC(geo_dis)   = {stats['auroc_geometric_disagreement']:.3f} (target: 0.891)")
+
+    return data
+
+
+def run_carla_study_pipeline(args):
+    """Run pipeline with CARLA case study data (Section 5 of paper)."""
+    from sotif_uncertainty.carla_case_study import (
+        generate_carla_case_study,
+        validate_carla_case_study,
+        print_validation_report,
+    )
+
+    print("\n  Stage 1: Generating CARLA case study ensemble data...")
+    data = generate_carla_case_study(seed=args.seed)
+
+    print(f"    Generated {data['n_tp']} TP + {data['n_fp']} FP = "
+          f"{data['n_tp'] + data['n_fp']} proposals")
+    print(f"    Ensemble members: K={data['K']}")
+    print(f"    Frames: {data['n_frames']}")
+
+    # Validate against paper statistics
+    stats = validate_carla_case_study(data)
+    print(f"\n    Validation:")
+    print(f"      AUROC(mean_conf) = {stats['auroc_mean_conf']:.3f}")
+    print(f"      AUROC(conf_var)  = {stats['auroc_conf_var']:.3f}")
+    print(f"      AUROC(geo_dis)   = {stats['auroc_geo_disagree']:.3f}")
+    print(f"      ECE = {stats['ece']:.3f}, NLL = {stats['nll']:.3f}, "
+          f"Brier = {stats['brier']:.3f}")
 
     return data
 
@@ -464,6 +493,9 @@ def main():
     # ================================================================
     if args.mode == "demo":
         data = run_demo_pipeline(args)
+
+    elif args.mode == "carla_study":
+        data = run_carla_study_pipeline(args)
 
     elif args.mode == "results":
         if args.input is None:
