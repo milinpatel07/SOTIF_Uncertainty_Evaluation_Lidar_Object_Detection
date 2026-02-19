@@ -18,7 +18,7 @@ Produces a comprehensive comparison report with:
 Usage:
     python scripts/execute_evaluation.py \\
         --carla_root /path/to/SOTIF-PCOD/SOTIF_Scenario_Dataset \\
-        --output_dir reports/evaluation_report
+        --output_dir results
 
 Reference:
     ISO 21448:2022, Patel & Jung (2025, 2026).
@@ -956,7 +956,7 @@ All results are fully reproducible with seed=42. To regenerate:
 ```bash
 python scripts/execute_evaluation.py \\
     --carla_root /path/to/SOTIF-PCOD/SOTIF_Scenario_Dataset \\
-    --output_dir reports/evaluation_report \\
+    --output_dir results \\
     --seed 42
 ```
 
@@ -977,7 +977,7 @@ def main():
                         default="/home/user/SOTIF-PCOD/SOTIF_Scenario_Dataset",
                         help="Root of CARLA SOTIF dataset.")
     parser.add_argument("--output_dir", type=str,
-                        default="reports/evaluation_report",
+                        default="results",
                         help="Output directory for report and figures.")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--K", type=int, default=6,
