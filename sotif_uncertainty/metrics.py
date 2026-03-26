@@ -265,6 +265,53 @@ def compute_brier(scores: np.ndarray, labels: np.ndarray) -> float:
     return float(np.mean((scores - labels) ** 2))
 
 
+def compute_mce(
+    scores: np.ndarray,
+    labels: np.ndarray,
+    n_bins: int = 10,
+) -> float:
+    """
+    Compute Maximum Calibration Error (MCE).
+
+    MCE = max_{m=1..M} |acc(B_m) - conf(B_m)|
+
+    MCE reports the worst-case bin calibration error rather than
+    the weighted average (ECE). For a single-class problem, MCE
+    equals the class-conditional Mac-ECE.
+
+    Parameters
+    ----------
+    scores : np.ndarray, shape (N,)
+        Predicted confidence scores.
+    labels : np.ndarray, shape (N,)
+        Correctness labels (1=TP, 0=FP).
+    n_bins : int
+        Number of equal-width bins.
+
+    Returns
+    -------
+    float
+        MCE value in [0, 1].
+    """
+    bin_boundaries = np.linspace(0, 1, n_bins + 1)
+    max_gap = 0.0
+
+    for m in range(n_bins):
+        lower = bin_boundaries[m]
+        upper = bin_boundaries[m + 1]
+        if m == n_bins - 1:
+            mask = (scores >= lower) & (scores <= upper)
+        else:
+            mask = (scores >= lower) & (scores < upper)
+
+        if np.sum(mask) > 0:
+            acc = np.mean(labels[mask])
+            conf = np.mean(scores[mask])
+            max_gap = max(max_gap, abs(acc - conf))
+
+    return float(max_gap)
+
+
 def compute_all_metrics(
     mean_conf: np.ndarray,
     conf_var: np.ndarray,
@@ -299,6 +346,7 @@ def compute_all_metrics(
 
     # Calibration
     ece_val, bin_acc, bin_conf, bin_counts = compute_ece(mean_conf, labels, n_bins)
+    mce_val = compute_mce(mean_conf, labels, n_bins)
     nll_val = compute_nll(mean_conf, labels)
     brier_val = compute_brier(mean_conf, labels)
 
@@ -317,6 +365,7 @@ def compute_all_metrics(
         },
         "calibration": {
             "ece": ece_val,
+            "mce": mce_val,
             "nll": nll_val,
             "brier": brier_val,
             "bin_accuracies": bin_acc,

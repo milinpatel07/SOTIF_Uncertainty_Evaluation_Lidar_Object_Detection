@@ -209,6 +209,127 @@ def cluster_detections(
 
 
 # ---------------------------------------------------------------------------
+# Weighted Box Fusion (WBF) — alternative to DBSCAN
+# ---------------------------------------------------------------------------
+
+def weighted_box_fusion(
+    scores: np.ndarray,
+    boxes: np.ndarray,
+    iou_threshold: float = 0.5,
+    min_members: int = 1,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Weighted Box Fusion for ensemble detection aggregation.
+
+    WBF fuses overlapping detections using confidence-weighted box averaging.
+    Unlike DBSCAN (which uses spatial distance only), WBF incorporates
+    confidence scores into the fusion step. This creates a dependency between
+    the fused box quality and the confidence values being evaluated.
+
+    Algorithm:
+        1. Flatten all K×N detections and sort by confidence (descending).
+        2. For each detection, find the first existing cluster with
+           BEV IoU >= iou_threshold. If found, add to that cluster;
+           otherwise start a new cluster.
+        3. For each cluster, compute the fused box as the confidence-weighted
+           mean of member boxes.
+        4. The fused confidence is the mean of member confidences.
+
+    Parameters
+    ----------
+    scores : np.ndarray, shape (N, K)
+        Per-member confidence scores. Zero means not detected.
+    boxes : np.ndarray, shape (N, K, 7)
+        Per-member bounding boxes [x, y, z, w, l, h, yaw].
+    iou_threshold : float
+        Minimum BEV IoU to fuse two detections.
+    min_members : int
+        Minimum number of distinct members required to keep a fused detection.
+
+    Returns
+    -------
+    fused_scores : np.ndarray, shape (M, K)
+        Per-member score vectors for each fused detection.
+    fused_boxes : np.ndarray, shape (M, K, 7)
+        Per-member box arrays for each fused detection.
+    cluster_sizes : np.ndarray, shape (M,)
+        Number of distinct members contributing to each fused detection.
+    """
+    N, K = scores.shape
+
+    # Flatten all detections with their proposal and member indices
+    flat = []
+    for i in range(N):
+        for k in range(K):
+            if scores[i, k] > 0 and not np.any(np.isnan(boxes[i, k])):
+                flat.append((scores[i, k], i, k, boxes[i, k]))
+
+    if len(flat) == 0:
+        return (np.zeros((0, K)), np.full((0, K, 7), np.nan),
+                np.zeros(0, dtype=int))
+
+    # Sort by confidence descending
+    flat.sort(key=lambda x: -x[0])
+
+    # Cluster by greedy IoU matching
+    clusters = []  # Each cluster: list of (score, proposal_idx, member_idx, box)
+    cluster_fused_boxes = []  # Running weighted-average box for each cluster
+
+    for score_val, prop_idx, mem_idx, box in flat:
+        matched = False
+        for c_idx, (cluster, fused_box) in enumerate(
+            zip(clusters, cluster_fused_boxes)
+        ):
+            iou = _bev_iou_pair(box, fused_box)
+            if iou >= iou_threshold:
+                cluster.append((score_val, prop_idx, mem_idx, box))
+                # Update fused box as confidence-weighted mean
+                total_w = sum(s for s, _, _, _ in cluster)
+                new_fused = np.zeros(7)
+                for s, _, _, b in cluster:
+                    new_fused += s * b
+                new_fused /= total_w
+                # Yaw from highest-confidence member
+                new_fused[6] = cluster[0][3][6]
+                cluster_fused_boxes[c_idx] = new_fused
+                matched = True
+                break
+
+        if not matched:
+            clusters.append([(score_val, prop_idx, mem_idx, box)])
+            cluster_fused_boxes.append(box.copy())
+
+    # Build output arrays
+    result_scores = []
+    result_boxes = []
+    result_sizes = []
+
+    for cluster in clusters:
+        members_present = set(m for _, _, m, _ in cluster)
+        if len(members_present) < min_members:
+            continue
+
+        # Build K-dimensional score and box vectors
+        s_vec = np.zeros(K)
+        b_vec = np.full((K, 7), np.nan)
+        for score_val, prop_idx, mem_idx, box in cluster:
+            if s_vec[mem_idx] == 0 or score_val > s_vec[mem_idx]:
+                s_vec[mem_idx] = score_val
+                b_vec[mem_idx] = box
+
+        result_scores.append(s_vec)
+        result_boxes.append(b_vec)
+        result_sizes.append(len(members_present))
+
+    if len(result_scores) == 0:
+        return (np.zeros((0, K)), np.full((0, K, 7), np.nan),
+                np.zeros(0, dtype=int))
+
+    return (np.array(result_scores), np.array(result_boxes),
+            np.array(result_sizes, dtype=int))
+
+
+# ---------------------------------------------------------------------------
 # Uncertainty decomposition (classification)
 # ---------------------------------------------------------------------------
 
