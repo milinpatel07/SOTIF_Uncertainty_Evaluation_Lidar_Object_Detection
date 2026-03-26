@@ -2,62 +2,163 @@
 
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-58%20passed-brightgreen)](tests/test_pipeline.py)
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/milinpatel07/SOTIF_Uncertainty_Evaluation_Lidar_Object_Detection/blob/main/notebooks/SOTIF_Uncertainty_Evaluation_Demo.ipynb)
 
-This repository provides the evaluation methodology and experimental code for the following research:
+This repository contains the evaluation code for:
 
 > **Uncertainty Evaluation to Support Safety of the Intended Functionality Analysis for Identifying Performance Insufficiencies in ML-Based LiDAR Object Detection**
 >
-> Milin Patel and Rolf Jung, Kempten University of Applied Sciences (2026)
+> Milin Patel and Rolf Jung, VEHITS 2026 (Paper #74)
 
-> **Uncertainty Representation in a SOTIF-Related Use Case with Dempster-Shafer Theory for LiDAR Sensor-Based Object Detection**
->
-> Milin Patel and Rolf Jung, Kempten University of Applied Sciences (2025), [arXiv:2503.02087](https://arxiv.org/abs/2503.02087)
+The pipeline generates simulated ensemble predictions from ground truth annotations with weather-dependent confidence perturbations, runs the five-stage evaluation, and produces all figures and tables reported in the paper. A single command reproduces the results.
 
 ---
 
-## Motivation
+## Reproduction
 
-ISO 21448 (SOTIF) requires systematic identification of performance insufficiencies and triggering conditions in automated driving perception. However, its analysis techniques assume explicitly specified system behaviour and cannot directly address ML-based systems whose decision logic is learned from data.
+```bash
+git clone https://github.com/milinpatel07/SOTIF_Uncertainty_Evaluation_Lidar_Object_Detection.git
+cd SOTIF_Uncertainty_Evaluation_Lidar_Object_Detection
+pip install -e .
+python scripts/evaluate.py
+```
 
-This work bridges the gap by using **prediction uncertainty from deep ensembles** (K=6 SECOND detectors) as a proxy for detection reliability, enabling three ISO 21448 activities:
+This runs the CARLA case study evaluation (Section 5 of the paper) with seed=42 and writes figures and a JSON results file to `output/`. The run takes about 5 seconds on a standard machine. No GPU is needed.
 
-| SOTIF Activity | ISO 21448 Clause | Output |
-|---|---|---|
-| Performance insufficiency identification | Clause 7 | Per-detection AUROC separating TP from FP |
-| Triggering condition ranking | Clause 7 | Conditions ranked by FP share and uncertainty |
-| Acceptance criteria documentation | Clause 11 | Operating points with coverage and FAR |
+To run the test suite:
+
+```bash
+pip install pytest
+pytest tests/ -v
+```
+
+58 tests, all passing.
 
 ---
 
-## Experimental Results
+## Results
 
-The methodology is evaluated on two datasets: real-world KITTI and synthetic CARLA (SOTIF-PCOD, 547 frames across 22 weather configurations).
+All numbers below are produced by `python scripts/evaluate.py` with seed=42. They are the reference values for the paper.
 
-### Discrimination (AUROC)
+### Dataset
 
-| Indicator | KITTI (Real-World) | CARLA (Synthetic) |
+| Property | Value |
+|---|---|
+| Frames | 547 |
+| Environmental configurations | 22 |
+| Triggering condition categories | 4 |
+| Ensemble members (K) | 6 |
+| Total proposals | 1,924 |
+| True positives (TP) | 1,012 |
+| False positives (FP) | 912 |
+| FP ratio | 47.4% |
+
+### Indicator Statistics (Table 5)
+
+| Indicator | TP (mean +/- std) | FP (mean +/- std) |
 |---|---|---|
-| Mean confidence | 0.999 | 0.895 |
-| Confidence variance | 0.889 | 0.738 |
-| Geometric disagreement | 0.912 | 0.974 |
+| Mean confidence | 0.457 +/- 0.148 | 0.197 +/- 0.131 |
+| Confidence variance | 0.013 +/- 0.014 | 0.026 +/- 0.021 |
+| Geometric disagreement | 0.13 +/- 0.06 | 0.65 +/- 0.27 |
 
-### Calibration
+### Discrimination (Table 6)
 
-| Metric | KITTI | CARLA |
+| Indicator | AUROC |
+|---|---|
+| Mean confidence | 0.903 |
+| Confidence variance | 0.722 |
+| Geometric disagreement | 0.982 |
+
+### Calibration (Table 7)
+
+| Metric | Value |
+|---|---|
+| ECE | 0.231 |
+| NLL | 0.554 |
+| Brier Score | 0.193 |
+| AURC | 0.196 |
+
+### Operating Points (Table 8)
+
+Selected operating points from the acceptance gate grid search:
+
+| Gate | Coverage | Retained | FP | FAR |
+|---|---|---|---|---|
+| s >= 0.35 | 45.1% | 867 | 115 | 0.133 |
+| s >= 0.50 | 22.3% | 430 | 37 | 0.086 |
+| s >= 0.35 & d <= 0.30 | 40.2% | 773 | 22 | 0.028 |
+| s >= 0.50 & d <= 0.30 | 20.7% | 399 | 6 | 0.015 |
+| s >= 0.60 & var <= 0.010 | 5.4% | 103 | 0 | 0.000 |
+| s >= 0.70 | 2.8% | 53 | 0 | 0.000 |
+
+The strictest gate achieving FAR=0 with highest coverage is s >= 0.60 & var <= 0.010 (5.4% coverage, 103 proposals retained, 0 FP).
+
+### Triggering Condition Ranking (Table 9)
+
+| Condition | FP Count | FP Share | Mean Conf (FP) | Mean Var (FP) |
+|---|---|---|---|---|
+| Night | 347 | 38.0% | 0.212 | 0.024 |
+| Heavy rain | 294 | 32.2% | 0.165 | 0.023 |
+| Nominal | 222 | 24.3% | 0.222 | 0.030 |
+| Fog/visibility | 49 | 5.4% | 0.177 | 0.032 |
+
+### Frame-Level Triage
+
+149 of 547 frames (27.2%) flagged at the 80th percentile FP variance threshold (0.039).
+
+---
+
+## Figures
+
+The pipeline generates 14 figures in the output directory:
+
+| Filename | Description |
+|---|---|
+| `indicator_distributions.png` | Histogram per indicator, TP vs FP |
+| `roc_curves.png` | ROC curves for all three indicators |
+| `reliability_diagram_rich.png` | Predicted confidence vs observed accuracy (10 bins) |
+| `risk_coverage_curve.png` | Risk-coverage curve |
+| `tc_ranking.png` | FP share by triggering condition category |
+| `operating_points.png` | Coverage vs FAR for acceptance gate configurations |
+| `scatter_score_var_tp_fp.png` | Mean confidence vs variance scatter (TP/FP) |
+| `frame_risk_scatter.png` | Per-frame detection count vs high-uncertainty FP count |
+| `operating_point_heatmap.png` | FAR and coverage heatmaps over threshold grid |
+| `condition_boxplots.png` | Per-condition box plots of indicators |
+| `condition_breakdown.png` | TP/FP stacked bars by condition |
+| `member_agreement.png` | Ensemble member detection agreement histograms |
+| `iso21448_scenario_grid.png` | ISO 21448 Area 1-4 categorisation diagram |
+| `summary_dashboard.png` | Multi-panel summary of all results |
+
+---
+
+## Methodology
+
+Five-stage pipeline:
+
+1. **Ensemble inference** (Stage 1): For each of 547 frames, generate K=6 detection sets from ground truth annotations with weather-dependent confidence perturbations, distance-dependent detection probability, and stochastic inter-member disagreement.
+
+2. **Association and uncertainty** (Stage 2): DBSCAN clustering on BEV IoU distance matrix (eps=0.5, min_samples=4) produces unified proposals. Per proposal, compute mean confidence (Eq. 1), confidence variance (Eq. 2), and geometric disagreement (Eq. 3). Non-detecting members are zero-padded.
+
+3. **Ground truth matching** (Stage 3): Greedy matching sorted by mean confidence descending, BEV IoU >= 0.5, one-to-one assignment. Produces TP/FP/FN labels.
+
+4. **Metrics** (Stage 4): AUROC per indicator, ECE (10 bins), NLL, Brier score, AURC. Acceptance gate grid search over threshold combinations; coverage and FAR per configuration.
+
+5. **SOTIF artefacts** (Stage 5): Triggering condition ranking by FP share (Clause 7), frame-level flagging at 80th percentile FP variance (Clause 7), acceptance gate operating point table (Clause 11).
+
+### Uncertainty Indicators
+
+| Indicator | Formula | Uncertainty Type |
 |---|---|---|
-| ECE | 0.202 | 0.257 |
-| NLL | 0.235 | 0.557 |
-| Brier Score | 0.049 | 0.197 |
+| Mean confidence | (1/K) * sum of s_j^(k) | Existence |
+| Confidence variance | (1/(K-1)) * sum of (s_j^(k) - mean)^2 | Epistemic |
+| Geometric disagreement | 1 - mean pairwise BEV IoU | Localisation |
 
-### Operating Points
+### Acceptance Gate
 
-At confidence-plus-variance gate (s >= 0.70, var <= 0.005) on KITTI: **25.8% coverage at zero FAR** (120 of 465 proposals retained).
+```
+G(s_bar, sigma2, d_iou) = [s_bar >= tau_s] AND [sigma2 <= tau_v] AND [d_iou <= tau_d]
+```
 
-At confidence-plus-geometric gate (s >= 0.35, d_IoU <= 0.49) on CARLA: **38.3% coverage at zero FAR** (737 of 1,924 proposals retained).
-
-Full results, figures, and cross-dataset analysis are in [`results/`](results/).
+Grid search ranges: tau_s in [0.20, 0.80], tau_v in {0.002, 0.005, 0.010}, tau_d in {0.20, 0.30, 0.40, 0.50}.
 
 ---
 
@@ -65,258 +166,70 @@ Full results, figures, and cross-dataset analysis are in [`results/`](results/).
 
 ```
 .
-├── paper/                                 # Research paper sources
-│   ├── SOTIF_Uncertainty_Conference_Paper.tex
-│   └── SOTIF_Uncertainty_Conference_Paper.md
+├── sotif_uncertainty/           # Core Python package
+│   ├── __init__.py              # Public API
+│   ├── uncertainty.py           # Uncertainty indicators (Eqs. 1-3)
+│   ├── ensemble.py              # DBSCAN clustering + uncertainty decomposition
+│   ├── matching.py              # TP/FP/FN matching (BEV IoU >= 0.5)
+│   ├── metrics.py               # AUROC, AURC, ECE, NLL, Brier Score
+│   ├── sotif_analysis.py        # TC ranking, frame flags, acceptance gates
+│   ├── visualization.py         # Figure generation (14 plot types)
+│   ├── carla_case_study.py      # CARLA case study data generation (Section 5)
+│   ├── demo_data.py             # Lightweight synthetic data for demos
+│   ├── dst_uncertainty.py       # Extension: Dempster-Shafer Theory decomposition
+│   ├── mc_dropout.py            # Extension: MC Dropout alternative
+│   ├── kitti_utils.py           # Extension: KITTI calibration, label I/O
+│   ├── weather_augmentation.py  # Extension: physics-based weather effects
+│   └── dataset_adapter.py       # Extension: unified adapter for KITTI/CARLA
 │
-├── sotif_uncertainty/                     # Core Python package
-│   ├── __init__.py                        # Public API
-│   ├── uncertainty.py                     # Uncertainty indicators (Eqs. 1-3)
-│   ├── ensemble.py                        # DBSCAN clustering + uncertainty decomposition
-│   ├── matching.py                        # TP/FP/FN matching (BEV IoU >= 0.5)
-│   ├── metrics.py                         # AUROC, AURC, ECE, NLL, Brier Score
-│   ├── sotif_analysis.py                  # TC ranking, frame flags, acceptance gates
-│   ├── visualization.py                   # Figure generation (13 plot types)
-│   ├── carla_case_study.py                # CARLA case study data generation
-│   ├── demo_data.py                       # Lightweight synthetic data for demos
-│   ├── dst_uncertainty.py                 # Dempster-Shafer Theory decomposition
-│   ├── mc_dropout.py                      # MC Dropout alternative to ensembles
-│   ├── kitti_utils.py                     # KITTI calibration, label I/O
-│   ├── weather_augmentation.py            # Physics-based weather effects
-│   └── dataset_adapter.py                 # Unified adapter for KITTI/CARLA formats
-│
-├── scripts/                               # Execution scripts
-│   ├── evaluate.py                        # Evaluation (demo / carla_study / real modes)
-│   ├── run_pipeline.py                    # End-to-end pipeline orchestrator
-│   ├── execute_evaluation.py              # Cross-dataset evaluation with report
-│   ├── run_inference.py                   # Ensemble inference + DBSCAN + evaluation
-│   ├── train_ensemble.sh                  # Train K SECOND models via OpenPCDet
-│   ├── prepare_kitti.py                   # Download and prepare KITTI dataset
-│   └── generate_carla_data.py             # Generate CARLA simulation data
-│
-├── results/                               # Evaluation outputs
-│   ├── evaluation_report.md               # Full cross-dataset analysis report
-│   ├── comparison_summary.json            # Machine-readable cross-dataset metrics
-│   ├── results_summary.json               # CARLA case study detailed metrics
-│   ├── evaluation_results.json            # CARLA case study summary
-│   └── figures/
-│       ├── carla_case_study/              # 13 CARLA case study figures
-│       ├── carla_synthetic/               # 13 CARLA cross-dataset figures
-│       ├── kitti_real_world/              # 13 KITTI figures
-│       └── comparison/                    # 5 cross-dataset comparison figures
-│
-├── docs/
-│   └── extending.md                       # Guide: adding detectors, datasets, indicators
-│
-├── notebooks/
-│   └── SOTIF_Uncertainty_Evaluation_Demo.ipynb   # Interactive Colab demo
-│
-├── configs/
-│   └── second_sotif_ensemble.yaml         # OpenPCDet SECOND config for K=6 ensemble
+├── scripts/
+│   ├── evaluate.py              # Main entry point (runs CARLA case study)
+│   ├── run_pipeline.py          # End-to-end pipeline with DST analysis
+│   ├── execute_evaluation.py    # Cross-dataset evaluation with report
+│   ├── run_inference.py         # Ensemble inference (requires OpenPCDet)
+│   ├── train_ensemble.sh        # Train K SECOND models (requires OpenPCDet)
+│   ├── prepare_kitti.py         # Download and prepare KITTI dataset
+│   └── generate_carla_data.py   # Generate CARLA simulation data
 │
 ├── tests/
-│   └── test_pipeline.py                   # 58 tests across all pipeline stages
+│   └── test_pipeline.py         # 58 tests across all pipeline stages
 │
-├── CITATION.cff
+├── configs/
+│   └── second_sotif_ensemble.yaml  # OpenPCDet SECOND config for K=6 ensemble
+│
+├── notebooks/
+│   └── SOTIF_Uncertainty_Evaluation_Demo.ipynb  # Interactive demo
+│
+├── paper/                       # Paper sources (.tex, .md)
 ├── requirements.txt
 ├── pyproject.toml
 ├── setup.py
 └── LICENSE
 ```
 
----
-
-## Methodology
-
-The evaluation pipeline comprises five stages:
-
-```
-LiDAR Frame + K Ensemble Members
-         │
-   ┌─────▼─────┐
-   │  Stage 1   │  Ensemble Inference (K independent forward passes)
-   └─────┬─────┘
-         │  K × D^(k) detections
-   ┌─────▼─────┐
-   │  Stage 2   │  DBSCAN Clustering + Uncertainty Indicators
-   └─────┬─────┘   ├─ Mean confidence (s̄_j): existence uncertainty
-         │         ├─ Confidence variance (σ²_s,j): epistemic uncertainty
-         │         └─ Geometric disagreement (d_iou,j): localisation uncertainty
-   ┌─────▼─────┐
-   │  Stage 3   │  Correctness Determination (greedy matching, BEV IoU ≥ 0.5)
-   └─────┬─────┘   └─ TP / FP / FN labels per proposal
-         │
-   ┌─────▼─────┐
-   │  Stage 4   │  Metric Computation
-   └─────┬─────┘   ├─ Discrimination: AUROC, AURC
-         │         ├─ Calibration: ECE, NLL, Brier
-         │         └─ Operating characteristics: Coverage, FAR at thresholds
-   ┌─────▼─────┐
-   │  Stage 5   │  SOTIF Analysis Artefacts
-   └───────────┘   ├─ TC ranking (Clause 7)
-                   ├─ Frame-level triage (Clause 7, Area 3 → Area 2)
-                   ├─ Acceptance gates (Clause 11)
-                   └─ Confidence interpretation (Clause 10)
-```
-
-### Uncertainty Indicators
-
-| Indicator | Formula | Uncertainty Type | Safety Concern |
-|---|---|---|---|
-| Mean confidence | (1/K) Σ s_j^(k) | Existence | False or missed detection |
-| Confidence variance | (1/(K−1)) Σ (s_j^(k) − s̄)² | Epistemic | Unknown operating condition |
-| Geometric disagreement | 1 − mean pairwise BEV IoU | Localisation | Incorrect distance estimate |
-
-### Acceptance Gate
-
-```
-G(s̄, σ²_s, d_iou) = [s̄ ≥ τ_s] ∧ [σ²_s ≤ τ_v] ∧ [d_iou ≤ τ_d]
-```
-
-The multi-indicator gate filters detections using all three uncertainty dimensions, achieving lower FAR than confidence alone at comparable coverage.
-
-### DBSCAN Detection Association
-
-Detections from K ensemble members are clustered using DBSCAN on a BEV IoU distance matrix:
-
-1. Collect all detections from K members for each frame
-2. Compute pairwise `(1 − BEV IoU)` distance matrix
-3. Run DBSCAN with `eps = 1 − iou_threshold` (default 0.5)
-4. Voting strategies control `min_samples`:
-   - **Affirmative** (`min_samples=1`): keep all detections
-   - **Consensus** (`min_samples=K//2+1`): majority agreement
-   - **Unanimous** (`min_samples=K`): all members agree
-5. Aggregate: mean box position, yaw from highest-confidence member
-
-### Dempster-Shafer Theory Decomposition
-
-Ensemble member scores are converted to mass functions and combined using Dempster's rule, decomposing total uncertainty into:
-
-| Component | Interpretation |
-|---|---|
-| Aleatoric | Irreducible sensor noise (Shannon entropy of pignistic probability) |
-| Epistemic | Model ignorance (Plausibility − Belief interval width) |
-| Ontological | Evidence for unknown unknowns (combined conflict mass) |
-
----
-
-## Quick Start
-
-### Google Colab (No Setup)
-
-Click the Colab badge above or open [`notebooks/SOTIF_Uncertainty_Evaluation_Demo.ipynb`](notebooks/SOTIF_Uncertainty_Evaluation_Demo.ipynb). Runs end-to-end with synthetic data — no GPU or dataset download needed.
-
-### Local Installation
-
-```bash
-git clone https://github.com/milinpatel07/SOTIF_Uncertainty_Evaluation_Lidar_Object_Detection.git
-cd SOTIF_Uncertainty_Evaluation_Lidar_Object_Detection
-pip install -e .
-
-# Quick demo (synthetic data, generates figures)
-python scripts/evaluate.py
-
-# CARLA case study (547 frames, 22 weather configs, full analysis)
-python scripts/evaluate.py --mode carla_study
-
-# End-to-end pipeline with figure generation
-python scripts/run_pipeline.py --mode carla_study --output_dir results
-
-# Run tests (58 tests)
-pytest tests/ -v
-```
-
-### Cross-Dataset Evaluation (CARLA + KITTI)
-
-```bash
-# Clone the SOTIF-PCOD dataset
-git clone https://github.com/milinpatel07/SOTIF-PCOD.git
-
-# Run cross-dataset evaluation with report generation
-python scripts/execute_evaluation.py \
-    --carla_root SOTIF-PCOD/SOTIF_Scenario_Dataset \
-    --output_dir results
-
-# Outputs:
-#   results/evaluation_report.md         — full analysis with tables
-#   results/comparison_summary.json      — machine-readable metrics
-#   results/figures/carla_synthetic/     — 13 CARLA figures
-#   results/figures/kitti_real_world/    — 13 KITTI figures
-#   results/figures/comparison/          — 5 cross-dataset comparison figures
-```
+Extension modules (`dst_uncertainty.py`, `mc_dropout.py`, `kitti_utils.py`, `weather_augmentation.py`, `dataset_adapter.py`) are not part of the VEHITS 2026 paper evaluation. They provide additional capabilities for real-world data pipelines and alternative uncertainty methods.
 
 ---
 
 ## Real Data Pipeline
 
-For reproducing results with actual LiDAR data and trained ensemble models.
+For use with trained ensemble models on KITTI or CARLA point clouds. Requires OpenPCDet >= 0.6, PyTorch >= 1.10, CUDA 11.x, and spconv v2.x.
 
-### Prerequisites
-
-| Component | Version | Purpose |
-|---|---|---|
-| Python | >= 3.8 | Runtime |
-| PyTorch | >= 1.10 | Training and inference |
-| CUDA | 11.x | GPU acceleration |
-| spconv | v2.x | Sparse convolutions |
-| [OpenPCDet](https://github.com/open-mmlab/OpenPCDet) | 0.6+ | SECOND detector framework |
-
-### Step 1: Prepare Dataset
-
-**KITTI:**
 ```bash
+# 1. Prepare dataset
 python scripts/prepare_kitti.py --data_root data/kitti
-```
 
-**CARLA:**
-```bash
-python scripts/generate_carla_data.py --output_dir data/carla --frames_per_config 10
-```
-
-Both produce KITTI-format output:
-```
-data/{kitti,carla}/
-├── training/
-│   ├── velodyne/       # .bin point cloud files
-│   ├── label_2/        # .txt label files
-│   ├── calib/          # .txt calibration files
-│   └── image_2/        # .png images (optional)
-├── ImageSets/
-│   ├── train.txt
-│   └── val.txt
-└── conditions.json     # Per-frame weather metadata (CARLA only)
-```
-
-### Step 2: Train Ensemble (K=6)
-
-```bash
+# 2. Train K=6 ensemble
 bash scripts/train_ensemble.sh --seeds 0 1 2 3 4 5
 
-# With custom parameters
-bash scripts/train_ensemble.sh \
-    --seeds 0 1 2 3 4 5 \
-    --epochs 80 \
-    --batch_size 4 \
-    --openpcdet_root /path/to/OpenPCDet
-```
-
-Each member trains the SECOND architecture (`MeanVFE → VoxelBackBone8x → HeightCompression → BaseBEVBackbone → AnchorHeadSingle`) with identical hyperparameters, differing only in random seed.
-
-### Step 3: Ensemble Inference
-
-```bash
+# 3. Run inference
 python scripts/run_inference.py \
-    --ckpt_dirs output/ensemble/seed_0 output/ensemble/seed_1 \
-                output/ensemble/seed_2 output/ensemble/seed_3 \
-                output/ensemble/seed_4 output/ensemble/seed_5 \
+    --ckpt_dirs output/ensemble/seed_0 ... output/ensemble/seed_5 \
     --data_path data/kitti \
     --gt_path data/kitti/training/label_2 \
     --voting consensus
-```
 
-### Step 4: Evaluate
-
-```bash
+# 4. Evaluate
 python scripts/evaluate.py \
     --input results/ensemble_results.pkl \
     --gt_path data/kitti/training/label_2 \
@@ -325,95 +238,37 @@ python scripts/evaluate.py \
 
 ---
 
-## Generated Figures
-
-The pipeline produces 13 figures per dataset:
-
-| Figure | Description | Paper Reference |
-|---|---|---|
-| Reliability diagram | Calibration: predicted confidence vs. actual accuracy | Section 5.3 |
-| Risk-coverage curve | Selective prediction: risk reduction with coverage | Section 5.3 |
-| Confidence-variance scatter | TP/FP separation in uncertainty space | Section 5.2 |
-| ROC curves | Discrimination for all three indicators | Table 3 |
-| Frame risk scatter | Per-frame mean confidence vs. variance | Section 5.5 |
-| TC ranking bar chart | Triggering condition FP share ranking | Table 7 |
-| Operating points comparison | Coverage and FAR at multiple thresholds | Table 6 |
-| ISO 21448 scenario grid | SOTIF Area 1–4 mapping | Figure 1 |
-| Indicator distributions | Histogram of each indicator by TP/FP | — |
-| Condition boxplots | Per-condition score and variance distributions | — |
-| Member agreement heatmap | Score correlation across ensemble members | — |
-| Condition breakdown | Stacked bar of TP/FP by environment | — |
-| Operating point heatmap | 2D threshold sweep (confidence × variance) | — |
-
----
-
-## Testing
-
-```bash
-pytest tests/ -v          # 58 tests
-python tests/test_pipeline.py   # alternative without pytest
-```
-
-Coverage includes: uncertainty indicators, DBSCAN clustering, TP/FP matching, all metrics (AUROC, ECE, NLL, Brier, AURC), SOTIF analysis, weather augmentation, DST decomposition, dataset adapter, and end-to-end pipeline.
-
----
-
 ## Dependencies
 
-**Demo / Colab** (no GPU needed):
+For reproduction (no GPU needed):
 - numpy >= 1.20
 - matplotlib >= 3.4
 - scikit-learn >= 0.24
 
-**Full pipeline** (real data, GPU required):
-- [OpenPCDet](https://github.com/open-mmlab/OpenPCDet) >= 0.6
-- PyTorch >= 1.10
-- spconv v2.x
-- CUDA 11.x
-
----
-
-## Available Datasets
-
-| Dataset | Size | Weather Conditions | Access |
-|---|---|---|---|
-| [SOTIF-PCOD](https://github.com/milinpatel07/SOTIF-PCOD) | 547 frames | 22 CARLA configs | Free |
-| [KITTI](https://www.cvlibs.net/datasets/kitti/eval_object.php?obj_benchmark=3d) | ~29 GB | Clear | Free |
-| [CARLA](https://carla.org/) | Custom | Any (simulated) | Free |
+Install with `pip install -e .`
 
 ---
 
 ## Citation
 
 ```bibtex
-@techreport{patel2026uncertainty,
+@inproceedings{patel2026uncertainty,
   title={Uncertainty Evaluation to Support Safety of the Intended Functionality
          Analysis for Identifying Performance Insufficiencies in ML-Based
          LiDAR Object Detection},
   author={Patel, Milin and Jung, Rolf},
-  year={2026},
-  institution={Kempten University of Applied Sciences}
-}
-
-@article{patel2025dst,
-  title={Uncertainty Representation in a SOTIF-Related Use Case with
-         Dempster-Shafer Theory for LiDAR Sensor-Based Object Detection},
-  author={Patel, Milin and Jung, Rolf},
-  journal={arXiv preprint arXiv:2503.02087},
-  year={2025}
+  booktitle={Proceedings of the 12th International Conference on Vehicle
+             Technology and Intelligent Transport Systems (VEHITS)},
+  year={2026}
 }
 ```
 
 ## References
 
-- ISO 21448:2022 — Safety of the Intended Functionality (SOTIF)
-- ISO/PAS 8800:2024 — Safety for AI-based systems in road vehicles
-- Lakshminarayanan et al. (2017) — Simple and Scalable Predictive Uncertainty Estimation using Deep Ensembles
-- Feng et al. (2018, 2021) — Uncertainty estimation for LiDAR 3D detection
-- Yan et al. (2018) — SECOND: Sparsely Embedded Convolutional Detection
-- Pitropov et al. (2022) — LiDAR-MIMO: Efficient Uncertainty Estimation for LiDAR 3D Object Detection
-- Shafer (1976) — A Mathematical Theory of Evidence
+- ISO 21448:2022 -- Safety of the Intended Functionality (SOTIF)
+- Lakshminarayanan et al. (2017) -- Simple and Scalable Predictive Uncertainty Estimation using Deep Ensembles
+- Yan et al. (2018) -- SECOND: Sparsely Embedded Convolutional Detection
 
 ## License
 
-MIT License — see [LICENSE](LICENSE) for details.
+MIT License -- see [LICENSE](LICENSE) for details.

@@ -1,3 +1,4 @@
+# Extension module — not part of the VEHITS 2026 paper evaluation
 """
 Physics-Based Weather Augmentation for LiDAR Point Clouds.
 

@@ -263,9 +263,10 @@ def main():
             conditions = load_conditions_metadata(args.conditions_file, frame_ids)
             print(f"  Loaded conditions from: {args.conditions_file}")
 
-    elif args.mode == "carla_study" or (args.mode is None and args.input is None):
-        # Determine which synthetic data generator to use
-        if args.mode == "carla_study":
+    elif args.mode in ("carla_study", "demo") or (args.mode is None and args.input is None):
+        # Default to carla_study when no mode or input is specified
+        effective_mode = args.mode if args.mode else "carla_study"
+        if effective_mode == "carla_study":
             print("Using CARLA case study data (Section 5 of paper).")
             from sotif_uncertainty.carla_case_study import generate_carla_case_study
             data = generate_carla_case_study(seed=args.seed)
