@@ -42,6 +42,7 @@ from sotif_uncertainty.metrics import (
     compute_auroc,
     compute_aurc,
     compute_ece,
+    compute_mce,
     compute_nll,
     compute_brier,
     compute_all_metrics,
@@ -56,6 +57,7 @@ from sotif_uncertainty.sotif_analysis import (
 )
 from sotif_uncertainty.ensemble import (
     cluster_detections,
+    weighted_box_fusion,
     clustered_to_pipeline_format,
     compute_classification_uncertainty,
     compute_regression_uncertainty,

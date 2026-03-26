@@ -323,6 +323,7 @@ def main():
 
     print("\n  Calibration (Table 4):")
     print(f"    ECE:         {cal['ece']:.3f}")
+    print(f"    MCE:         {cal['mce']:.3f}")
     print(f"    NLL:         {cal['nll']:.3f}")
     print(f"    Brier Score: {cal['brier']:.3f}")
     print(f"    AURC:        {rc['aurc']:.3f}")
@@ -485,6 +486,7 @@ def main():
         },
         "calibration": {
             "ece": float(cal["ece"]),
+            "mce": float(cal["mce"]),
             "nll": float(cal["nll"]),
             "brier": float(cal["brier"]),
             "aurc": float(rc["aurc"]),

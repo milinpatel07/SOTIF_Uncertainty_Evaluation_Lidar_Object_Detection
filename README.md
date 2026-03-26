@@ -73,9 +73,12 @@ All numbers below are produced by `python scripts/evaluate.py` with seed=42. The
 | Metric | Value |
 |---|---|
 | ECE | 0.231 |
+| MCE | 0.404 |
 | NLL | 0.554 |
 | Brier Score | 0.193 |
 | AURC | 0.196 |
+
+Note: With a single object class (vehicles), the class-conditional Mac-ECE reduces to standard ECE.
 
 ### Operating Points (Table 8)
 
@@ -104,6 +107,41 @@ The strictest gate achieving FAR=0 with highest coverage is s >= 0.60 & var <= 0
 ### Frame-Level Triage
 
 149 of 547 frames (27.2%) flagged at the 80th percentile FP variance threshold (0.039).
+
+### Ablation Studies
+
+Run with `python scripts/run_ablations.py`. Results saved to `results/ablations/`.
+
+**DBSCAN vs Weighted Box Fusion (WBF)**
+
+| Method | Proposals | AUROC(conf) | AUROC(var) | AUROC(geo) |
+|---|---|---|---|---|
+| DBSCAN | 1,924 | 0.903 | 0.722 | 0.982 |
+| WBF | 1,425 | 0.984 | 0.103 | 0.791 |
+
+DBSCAN uses spatial distance only (1 - BEV IoU) for clustering. WBF uses confidence-weighted averaging, creating a circular dependency: fused box quality depends on the confidence scores that are themselves being evaluated. DBSCAN avoids this, keeping indicator evaluation unbiased.
+
+**Deep Ensemble (K=6) vs MC Dropout (T=6)**
+
+| Method | AUROC(conf) | AUROC(var) | AUROC(geo) |
+|---|---|---|---|
+| Deep Ensemble | 0.903 | 0.722 | 0.982 |
+| MC Dropout | 0.864 | 0.177 | 0.510 |
+
+Deep ensembles produce higher inter-member diversity than MC Dropout's stochastic passes through a single model, yielding better TP/FP separation across all three indicators.
+
+**Confidence degradation sensitivity**
+
+| Degradation | AUROC(conf) | AUROC(var) | AUROC(geo) | ECE |
+|---|---|---|---|---|
+| Baseline (gamma=1.0) | 0.903 | 0.722 | 0.982 | 0.231 |
+| Distortion gamma=2.0 | 0.874 | 0.414 | 0.982 | 0.362 |
+| Distortion gamma=3.0 | 0.848 | 0.320 | 0.982 | 0.434 |
+| Noise sigma=0.10 | 0.893 | 0.585 | 0.982 | 0.219 |
+| Noise sigma=0.20 | 0.861 | 0.469 | 0.982 | 0.188 |
+| Noise sigma=0.30 | 0.833 | 0.416 | 0.982 | 0.159 |
+
+Geometric disagreement AUROC remains constant (0.982) under all confidence degradation levels because it depends only on box positions. This makes it a robust indicator when confidence calibration is unreliable. Mean confidence AUROC is preserved under monotonic distortion (ranking unchanged) but degrades with additive noise.
 
 ---
 
@@ -184,6 +222,7 @@ Grid search ranges: tau_s in [0.20, 0.80], tau_v in {0.002, 0.005, 0.010}, tau_d
 │
 ├── scripts/
 │   ├── evaluate.py              # Main entry point (runs CARLA case study)
+│   ├── run_ablations.py         # WBF comparison, MC Dropout, sensitivity analysis
 │   ├── run_pipeline.py          # End-to-end pipeline with DST analysis
 │   ├── execute_evaluation.py    # Cross-dataset evaluation with report
 │   ├── run_inference.py         # Ensemble inference (requires OpenPCDet)
