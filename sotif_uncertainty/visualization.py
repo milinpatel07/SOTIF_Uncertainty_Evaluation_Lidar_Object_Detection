@@ -457,7 +457,7 @@ def plot_condition_boxplots(
     # 1. Mean confidence per condition (all detections)
     ax = axes[0, 0]
     data = [mean_conf[conditions == c] for c in unique_conds]
-    bp = ax.boxplot(data, labels=unique_conds, patch_artist=True)
+    bp = ax.boxplot(data, tick_labels=unique_conds, patch_artist=True)
     for patch in bp['boxes']:
         patch.set_facecolor('#E3F2FD')
     ax.set_ylabel("Mean Confidence")
@@ -466,7 +466,7 @@ def plot_condition_boxplots(
     # 2. Confidence variance per condition (all detections)
     ax = axes[0, 1]
     data = [conf_var[conditions == c] for c in unique_conds]
-    bp = ax.boxplot(data, labels=unique_conds, patch_artist=True)
+    bp = ax.boxplot(data, tick_labels=unique_conds, patch_artist=True)
     for patch in bp['boxes']:
         patch.set_facecolor('#FFF3E0')
     ax.set_ylabel("Confidence Variance")
@@ -478,7 +478,7 @@ def plot_condition_boxplots(
     data = [d for d in data if len(d) > 0]
     cond_labels = [c for c, d in zip(unique_conds, [mean_conf[fp_mask & (conditions == c)] for c in unique_conds]) if len(d) > 0]
     if data:
-        bp = ax.boxplot(data, labels=cond_labels, patch_artist=True)
+        bp = ax.boxplot(data, tick_labels=cond_labels, patch_artist=True)
         for patch in bp['boxes']:
             patch.set_facecolor('#FFEBEE')
     ax.set_ylabel("Mean Confidence (FP only)")
@@ -489,7 +489,7 @@ def plot_condition_boxplots(
     data = [conf_var[fp_mask & (conditions == c)] for c in unique_conds]
     data = [d for d in data if len(d) > 0]
     if data:
-        bp = ax.boxplot(data, labels=cond_labels, patch_artist=True)
+        bp = ax.boxplot(data, tick_labels=cond_labels, patch_artist=True)
         for patch in bp['boxes']:
             patch.set_facecolor('#FFEBEE')
     ax.set_ylabel("Confidence Variance (FP only)")
@@ -799,6 +799,31 @@ def generate_all_figures(
         frame_summaries,
         save_path=os.path.join(output_dir, "frame_risk_scatter.png"),
     )
+
+    # ============================================================
+    # ROC curves for all three indicators
+    # ============================================================
+    if geo_disagree is not None:
+        from sotif_uncertainty.metrics import compute_auroc_with_curve
+        disc = metrics["discrimination"]
+        roc_data = {
+            "Mean Confidence": (
+                disc["roc_fpr"], disc["roc_tpr"],
+                disc["auroc_mean_confidence"],
+            ),
+        }
+        auroc_var, fpr_var, tpr_var = compute_auroc_with_curve(
+            conf_var, labels, higher_is_correct=False,
+        )
+        roc_data["Confidence Variance"] = (fpr_var, tpr_var, auroc_var)
+        auroc_geo, fpr_geo, tpr_geo = compute_auroc_with_curve(
+            geo_disagree, labels, higher_is_correct=False,
+        )
+        roc_data["Geometric Disagreement"] = (fpr_geo, tpr_geo, auroc_geo)
+        figures["roc_curves"] = plot_roc_curves(
+            roc_data,
+            save_path=os.path.join(output_dir, "roc_curves.png"),
+        )
 
     # ============================================================
     # Analysis figures

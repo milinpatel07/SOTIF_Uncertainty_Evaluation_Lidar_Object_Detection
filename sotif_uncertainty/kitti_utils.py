@@ -1,3 +1,4 @@
+# Extension module — not part of the VEHITS 2026 paper evaluation
 """
 KITTI Dataset Utilities.
 

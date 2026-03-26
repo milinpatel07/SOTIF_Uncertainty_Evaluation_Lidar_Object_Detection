@@ -45,5 +45,13 @@
   "flags": {
     "total_frames": 547,
     "flagged_count": 149
+  },
+  "dst_decomposition": {
+    "aleatoric_mean_tp": 0.8928473374364251,
+    "aleatoric_mean_fp": 0.5279639522117978,
+    "epistemic_mean_tp": 0.16094981529989322,
+    "epistemic_mean_fp": 0.3300633340612775,
+    "ontological_mean_tp": 0.010771475210938916,
+    "ontological_mean_fp": 0.01733301508054166
   }
 }
