@@ -276,8 +276,8 @@ def compute_mce(
     MCE = max_{m=1..M} |acc(B_m) - conf(B_m)|
 
     MCE reports the worst-case bin calibration error rather than
-    the weighted average (ECE). For a single-class problem, MCE
-    equals the class-conditional Mac-ECE.
+    the weighted average (ECE). For single-class problems, Mac-ECE
+    equals ECE because there is only one class to condition on.
 
     Parameters
     ----------

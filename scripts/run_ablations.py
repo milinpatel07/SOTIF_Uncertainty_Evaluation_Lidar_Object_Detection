@@ -2,23 +2,25 @@
 """
 Ablation studies and baseline comparisons for the SOTIF uncertainty evaluation.
 
-Produces three analyses that address common reviewer questions:
+Produces three ablation studies:
 
-1. WBF vs DBSCAN comparison (Section 3.2 justification):
+1. DBSCAN vs WBF association comparison (Section 3.2):
    Runs Weighted Box Fusion as an alternative to DBSCAN for detection
    association, then compares the resulting uncertainty indicators and
-   AUROC values. Demonstrates that DBSCAN's spatial-only clustering
-   avoids circular dependency on confidence scores.
+   AUROC values. WBF uses confidence-weighted averaging, which creates
+   a circular dependency when the fused outputs are evaluated as
+   uncertainty indicators.
 
-2. MC Dropout vs Deep Ensemble comparison (Section 6, Limitation 5):
+2. Deep Ensemble vs MC Dropout comparison (Section 6):
    Simulates MC Dropout with T=6 stochastic passes and compares AUROC
-   for mean confidence and confidence variance against the deep ensemble.
+   for mean confidence and confidence variance against the K=6 deep
+   ensemble.
 
-3. Confidence degradation sensitivity analysis (Section 3.1 robustness):
-   Applies monotonic distortion and additive noise to confidence scores,
-   then measures how each of the three indicators degrades. Shows that
-   geometric disagreement is confidence-independent and that confidence
-   variance captures relative disagreement regardless of calibration.
+3. Confidence degradation sensitivity (Section 3.1):
+   Applies monotonic distortion (s^gamma) and additive Gaussian noise
+   to confidence scores, then measures how each indicator's AUROC changes.
+   Geometric disagreement AUROC is invariant to confidence degradation
+   because it depends only on box positions.
 
 Usage:
     python scripts/run_ablations.py
@@ -111,12 +113,12 @@ def run_wbf_comparison(data, output_dir):
     print(f"  {'WBF':<12} {n_wbf:>10d} {auroc_mc_wbf:>12.3f} "
           f"{auroc_cv_wbf:>12.3f} {auroc_gd_wbf:>12.3f}")
 
-    print(f"\n  Interpretation:")
-    print(f"    DBSCAN clusters detections using spatial distance only (1 - BEV IoU).")
+    print(f"\n  Note:")
+    print(f"    DBSCAN clusters by spatial distance only (1 - BEV IoU).")
     print(f"    WBF uses confidence-weighted box averaging, creating a circular")
     print(f"    dependency: fused box quality depends on the confidence scores")
-    print(f"    that are themselves being evaluated as uncertainty indicators.")
-    print(f"    DBSCAN avoids this dependency, making indicator evaluation unbiased.")
+    print(f"    that are themselves being evaluated as indicators.")
+    print(f"    DBSCAN avoids this dependency by using only spatial information.")
 
     return {
         "dbscan": {
@@ -197,12 +199,12 @@ def run_mc_dropout_comparison(data, seed, output_dir):
     delta_conf = comparison['ensemble']['auroc_mean_conf'] - comparison['mc_dropout']['auroc_mean_conf']
     delta_var = comparison['ensemble']['auroc_conf_var'] - comparison['mc_dropout']['auroc_conf_var']
 
-    print(f"\n  Ensemble advantage: +{delta_conf:.3f} (conf), +{delta_var:.3f} (var)")
-    print(f"\n  Interpretation:")
-    print(f"    Deep ensembles with independently trained members produce higher")
-    print(f"    diversity in predictions than MC Dropout's stochastic passes through")
-    print(f"    a single model. This results in better separation between TP and FP")
-    print(f"    uncertainty indicators, consistent with Lakshminarayanan et al. (2017).")
+    print(f"\n  AUROC difference (ensemble - MC Dropout): "
+          f"+{delta_conf:.3f} (conf), +{delta_var:.3f} (var)")
+    print(f"\n  Note:")
+    print(f"    Independently trained ensemble members produce greater prediction")
+    print(f"    diversity than stochastic passes through a single model, consistent")
+    print(f"    with Lakshminarayanan et al. (2017).")
 
     return {
         "ensemble": {
@@ -310,14 +312,13 @@ def run_sensitivity_analysis(data, seed, output_dir):
             "ece": float(ece_val),
         })
 
-    print(f"\n  Interpretation:")
+    print(f"\n  Note:")
     print(f"    Geometric disagreement AUROC is constant ({auroc_geo_base:.3f}) across")
     print(f"    all degradation levels because it depends only on box positions,")
-    print(f"    not confidence scores. This makes it a robust indicator when")
-    print(f"    confidence calibration is unreliable.")
+    print(f"    not confidence values.")
     print(f"    Mean confidence AUROC is preserved under monotonic distortion")
     print(f"    (ranking unchanged) but degrades with additive noise.")
-    print(f"    Confidence variance AUROC changes under both distortions.")
+    print(f"    Confidence variance AUROC degrades under both distortion types.")
 
     return {
         "monotonic_distortion": results_distortion,
