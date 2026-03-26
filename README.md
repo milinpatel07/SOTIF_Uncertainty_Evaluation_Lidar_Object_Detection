@@ -9,7 +9,7 @@ This repository contains the evaluation code for:
 >
 > Milin Patel and Rolf Jung, VEHITS 2026 (Paper #74)
 
-The pipeline generates simulated ensemble predictions from ground truth annotations with weather-dependent confidence perturbations, runs the five-stage evaluation, and produces all figures and tables reported in the paper. A single command reproduces the results.
+The pipeline synthesizes ensemble detection outputs from ground truth annotations with weather-dependent confidence perturbations, processes them through five evaluation stages, and produces all figures and tables reported in the paper. A single command reproduces the results.
 
 ---
 
@@ -22,7 +22,7 @@ pip install -e .
 python scripts/evaluate.py
 ```
 
-This runs the CARLA case study evaluation (Section 5 of the paper) with seed=42 and writes figures and a JSON results file to `output/`. The run takes about 5 seconds on a standard machine. No GPU is needed.
+This runs the CARLA case study evaluation (547 frames, 22 environmental configurations, K=6 ensemble members) with seed=42 and writes figures and a JSON results file to `results/`. No GPU is needed.
 
 To run the test suite:
 
@@ -78,7 +78,7 @@ All numbers below are produced by `python scripts/evaluate.py` with seed=42. The
 | Brier Score | 0.193 |
 | AURC | 0.196 |
 
-Note: With a single object class (vehicles), the class-conditional Mac-ECE reduces to standard ECE.
+For single-class problems, Mac-ECE equals ECE.
 
 ### Operating Points (Table 8)
 
@@ -119,7 +119,7 @@ Run with `python scripts/run_ablations.py`. Results saved to `results/ablations/
 | DBSCAN | 1,924 | 0.903 | 0.722 | 0.982 |
 | WBF | 1,425 | 0.984 | 0.103 | 0.791 |
 
-DBSCAN uses spatial distance only (1 - BEV IoU) for clustering. WBF uses confidence-weighted averaging, creating a circular dependency: fused box quality depends on the confidence scores that are themselves being evaluated. DBSCAN avoids this, keeping indicator evaluation unbiased.
+DBSCAN clusters detections using spatial distance only (1 - BEV IoU). WBF uses confidence-weighted box averaging, creating a circular dependency: fused box quality depends on the confidence scores that are themselves being evaluated. DBSCAN avoids this dependency by using only spatial information for association.
 
 **Deep Ensemble (K=6) vs MC Dropout (T=6)**
 
@@ -128,7 +128,7 @@ DBSCAN uses spatial distance only (1 - BEV IoU) for clustering. WBF uses confide
 | Deep Ensemble | 0.903 | 0.722 | 0.982 |
 | MC Dropout | 0.864 | 0.177 | 0.510 |
 
-Deep ensembles produce higher inter-member diversity than MC Dropout's stochastic passes through a single model, yielding better TP/FP separation across all three indicators.
+In this experiment, deep ensembles yield higher AUROC than MC Dropout across all three indicators. The ensemble's independently trained members produce greater prediction diversity than MC Dropout's stochastic passes through a single model.
 
 **Confidence degradation sensitivity**
 
@@ -141,7 +141,7 @@ Deep ensembles produce higher inter-member diversity than MC Dropout's stochasti
 | Noise sigma=0.20 | 0.861 | 0.469 | 0.982 | 0.188 |
 | Noise sigma=0.30 | 0.833 | 0.416 | 0.982 | 0.159 |
 
-Geometric disagreement AUROC remains constant (0.982) under all confidence degradation levels because it depends only on box positions. This makes it a robust indicator when confidence calibration is unreliable. Mean confidence AUROC is preserved under monotonic distortion (ranking unchanged) but degrades with additive noise.
+Geometric disagreement AUROC remains constant (0.982) under all degradation levels because it depends only on box positions, not confidence values. Mean confidence AUROC is preserved under monotonic distortion (ranking unchanged) but degrades with additive noise. Confidence variance AUROC degrades under both distortion types.
 
 ---
 
@@ -246,7 +246,7 @@ Grid search ranges: tau_s in [0.20, 0.80], tau_v in {0.002, 0.005, 0.010}, tau_d
 └── LICENSE
 ```
 
-Extension modules (`dst_uncertainty.py`, `mc_dropout.py`, `kitti_utils.py`, `weather_augmentation.py`, `dataset_adapter.py`) are not part of the VEHITS 2026 paper evaluation. They provide additional capabilities for real-world data pipelines and alternative uncertainty methods.
+Extension modules (`dst_uncertainty.py`, `mc_dropout.py`, `kitti_utils.py`, `weather_augmentation.py`, `dataset_adapter.py`) are not part of the VEHITS 2026 paper evaluation. They add Dempster-Shafer uncertainty decomposition, MC Dropout inference, KITTI format support, physics-based weather perturbations, and unified dataset handling.
 
 ---
 

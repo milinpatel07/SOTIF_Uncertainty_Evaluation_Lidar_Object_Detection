@@ -1,8 +1,8 @@
 """
 SOTIF Uncertainty Evaluation for LiDAR Object Detection.
 
-Evaluation methodology for determining whether prediction uncertainty from
-ML-based LiDAR object detection supports SOTIF analysis per ISO 21448.
+Evaluates whether ensemble prediction uncertainty from ML-based LiDAR
+object detection can identify performance insufficiencies per ISO 21448.
 
 Modules:
     uncertainty         - Stage 2: Uncertainty indicator computation (Eqs. 1-3)
