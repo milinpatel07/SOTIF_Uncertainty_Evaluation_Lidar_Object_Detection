@@ -1,0 +1,36 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite the papers below."
+title: "SOTIF Uncertainty Evaluation for LiDAR Object Detection"
+version: 2.0.0
+license: MIT
+repository-code: "https://github.com/milinpatel07/SOTIF_Uncertainty_Evaluation_Lidar_Object_Detection"
+authors:
+  - family-names: Patel
+    given-names: Milin
+    email: milin.patel@hs-kempten.de
+    affiliation: "Kempten University of Applied Sciences"
+  - family-names: Jung
+    given-names: Rolf
+    email: rolf.jung@hs-kempten.de
+    affiliation: "Kempten University of Applied Sciences"
+preferred-citation:
+  type: conference-paper
+  title: "Uncertainty Evaluation to Support Safety of the Intended Functionality Analysis for Identifying Performance Insufficiencies in ML-Based LiDAR Object Detection"
+  authors:
+    - family-names: Patel
+      given-names: Milin
+    - family-names: Jung
+      given-names: Rolf
+  year: 2026
+references:
+  - type: article
+    title: "Uncertainty Representation in a SOTIF-Related Use Case with Dempster-Shafer Theory for LiDAR Sensor-Based Object Detection"
+    authors:
+      - family-names: Patel
+        given-names: Milin
+      - family-names: Jung
+        given-names: Rolf
+    year: 2025
+    identifiers:
+      - type: other
+        value: "arXiv:2503.02087"
